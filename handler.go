@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -285,6 +286,42 @@ func (s *Server) ParseMultiPartForm(req *Request, dirPath string) ([]string, map
 	}
 
 	return paramFiles, paramTexts, nil
+}
+
+func (s *Server) ParseMultiPartFormFile(req *Request, paramName string) (*os.File, *multipart.FileHeader, error) {
+	mediatype, _, err := mime.ParseMediaType(req.r.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if mediatype != "multipart/form-data" {
+		return nil, nil, fmt.Errorf("invalid content type")
+	}
+
+	file, fileHeader, err := req.r.FormFile(paramName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to retrieve file")
+	}
+	defer file.Close()
+
+	// Create a new *os.File and copy the contents of the multipart.File to it
+	destFile, err := os.CreateTemp("", "file")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temp file")
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to copy file contents")
+	}
+
+	// Seek back to the beginning of the file
+	_, err = destFile.Seek(0, io.SeekStart)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to seek file")
+	}
+
+	return destFile, fileHeader, nil
 }
 
 func (s *Server) Redirect(req *Request, url string) *Result {
