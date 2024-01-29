@@ -1,17 +1,21 @@
 package main
 
 import (
+	"flag"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/EnsurityTechnologies/config"
-	_ "github.com/EnsurityTechnologies/ensweb"
 	_ "github.com/EnsurityTechnologies/ensweb/example/server/docs"
 	"github.com/EnsurityTechnologies/logger"
 )
 
 func main() {
+	var licenseKey string
+	flag.StringVar(&licenseKey, "l", "", "License key")
+	flag.Parse()
 	cfg, err := config.LoadConfig("config.json")
 	if err != nil {
 		panic(err)
@@ -24,12 +28,12 @@ func main() {
 
 	logOptions := &logger.LoggerOptions{
 		Name:   "Main",
-		Color:  logger.AutoColor,
-		Output: fp,
+		Color:  []logger.ColorOption{logger.AutoColor, logger.ColorOff},
+		Output: []io.Writer{logger.DefaultOutput, fp},
 	}
 
 	log := logger.New(logOptions)
-	s, err := NewServer(cfg, log)
+	s, err := NewServer(cfg, log, licenseKey)
 	if err != nil {
 		log.Error("Failed to create server")
 		return

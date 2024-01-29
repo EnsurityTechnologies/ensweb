@@ -169,8 +169,30 @@ func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		req := basicRequestFunc(s, w, r)
+		var res *Result
+		errAuth := false
+		if s.secureAPI && req.Path != GetPublicKeyAPI {
+			licenkey := s.GetReqHeader(req, LicenseKeyHdr)
+			if licenkey != s.licenseKey {
+				errAuth = true
+				s.log.Error("invaid license", "exp", s.licenseKey, "recv", licenkey)
+				res = s.RenderJSONError(req, http.StatusUnauthorized, "invalid license key", "invalid license key")
+			}
+			if !errAuth {
+				var rid RequestID
+				err := decryptModel(req.ss, req.redID, &rid)
+				if err != nil {
+					errAuth = true
+					res = s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID")
+				}
+				// ::TODO:: validate request time
+			}
+		}
 
-		res := hf(req)
+		if !errAuth {
+			res = hf(req)
+		}
+
 		if res != nil && s.auditLog != nil {
 			timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
 			userAgent := r.Header.Get("User-Agent")
@@ -229,7 +251,18 @@ func (s *Server) IsFORM(req *Request) (bool, error) {
 }
 
 func (s *Server) ParseJSON(req *Request, model interface{}) error {
-	_, err := parseJSONRequest(false, req.r, req.w, model)
+	var err error
+	if s.secureAPI {
+		var sd SecureData
+		_, err = parseJSONRequest(false, req.r, req.w, &sd)
+		if err != nil {
+			return err
+		}
+		req.sd = sd.Data
+		return decryptModel(req.ss, sd.Data, model)
+	} else {
+		_, err = parseJSONRequest(false, req.r, req.w, model)
+	}
 	return err
 }
 

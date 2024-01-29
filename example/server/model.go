@@ -4,11 +4,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EnsurityTechnologies/adapter"
+	"github.com/EnsurityTechnologies/ensweb"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
 	"github.com/dgrijalva/jwt-go"
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 const (
@@ -16,13 +16,13 @@ const (
 )
 
 type Model struct {
-	db  *adapter.Adapter
+	db  *gorm.DB
 	log logger.Logger
 }
 
 // Base contains common columns for all tables.
 type Base struct {
-	ID                   uuid.UUID `gorm:"column:Id;primary_key;"`
+	ID                   uuid.UUID `gorm:"column:ID;primaryKey;"`
 	CreationTime         time.Time `gorm:"column:CreationTime;not null"`
 	CreatorID            uuid.UUID `gorm:"column:CreatorId"`
 	LastModificationTime time.Time `gorm:"column:LastModificationTime"`
@@ -42,8 +42,8 @@ type Request struct {
 }
 
 type Response struct {
-	Token   string `json:"token"`
-	Message string `json:"message"`
+	ensweb.BaseResponse
+	Token string `json:"token"`
 }
 
 type Token struct {
@@ -51,28 +51,48 @@ type Token struct {
 	jwt.StandardClaims
 }
 
+// // BeforeCreate will set a UUID rather than numeric ID.
+// func (base *Base) BeforeCreate(scope *gorm.Scope) error {
+// 	uuid := uuid.New()
+
+// 	err := scope.SetColumn("CreationTime", time.Now())
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return scope.SetColumn("ID", uuid)
+// }
+
+// // BeforeCreate will set a UUID rather than numeric ID.
+// func (base *Base) BeforeUpdate(scope *gorm.Scope) error {
+// 	return scope.SetColumn("LastModificationTime", time.Now())
+// }
+
 // BeforeCreate will set a UUID rather than numeric ID.
-func (base *Base) BeforeCreate(scope *gorm.Scope) error {
+func (b *Base) BeforeCreate(tx *gorm.DB) error {
 	uuid := uuid.New()
-
-	err := scope.SetColumn("CreationTime", time.Now())
-	if err != nil {
-		return err
-	}
-	return scope.SetColumn("ID", uuid)
+	tx.Statement.SetColumn("CreationTime", time.Now())
+	tx.Statement.SetColumn("ID", uuid)
+	return nil
 }
 
 // BeforeCreate will set a UUID rather than numeric ID.
-func (base *Base) BeforeUpdate(scope *gorm.Scope) error {
-	return scope.SetColumn("LastModificationTime", time.Now())
+func (b *Base) BeforeUpdate(tx *gorm.DB) error {
+	tx.Statement.SetColumn("LastModificationTime", time.Now())
+	return nil
 }
 
-func NewModel(db *adapter.Adapter, log logger.Logger) (*Model, error) {
+// BeforeCreate will set a UUID rather than numeric ID.
+func (b *Base) BeforeSave(tx *gorm.DB) error {
+	tx.Statement.SetColumn("LastModificationTime", time.Now())
+	return nil
+}
+
+func NewModel(db *gorm.DB, log logger.Logger) (*Model, error) {
 	m := &Model{
 		db:  db,
 		log: log,
 	}
-	err := db.InitTable(UserTable, &User{})
+	err := db.AutoMigrate(&User{})
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +113,11 @@ func NewModel(db *adapter.Adapter, log logger.Logger) (*Model, error) {
 // GetUser get user
 func (m *Model) GetUser(TenantID uuid.UUID, userName string) *User {
 	var user User
-	err := m.db.Find(TenantID, UserTable, "UserName=?", strings.ToLower(userName), &user)
+	err := m.db.Find(&user, "UserName=?", strings.ToLower(userName)).Error
 	if err != nil {
+		return nil
+	}
+	if user.UserName != strings.ToLower(userName) {
 		return nil
 	}
 	return &user
@@ -102,6 +125,6 @@ func (m *Model) GetUser(TenantID uuid.UUID, userName string) *User {
 
 // CreateUser create user
 func (m *Model) CreateUser(user *User) error {
-	err := m.db.Create(UserTable, user)
+	err := m.db.Create(user).Error
 	return err
 }

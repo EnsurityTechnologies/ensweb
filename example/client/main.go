@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/EnsurityTechnologies/config"
@@ -12,12 +13,15 @@ import (
 func main() {
 	var userName string
 	var password string
+	var licenseKey string
 	flag.StringVar(&userName, "u", "", "User Name")
 	flag.StringVar(&password, "p", "", "Password")
+	flag.StringVar(&licenseKey, "l", "", "License key")
 
 	logOptions := &logger.LoggerOptions{
-		Name:  "ClientExample",
-		Color: logger.AutoColor,
+		Name:   "ClientExample",
+		Color:  []logger.ColorOption{logger.AutoColor},
+		Output: []io.Writer{logger.DefaultOutput},
 	}
 
 	log := logger.New(logOptions)
@@ -37,14 +41,13 @@ func main() {
 	}
 
 	cmd := os.Args[1]
-
 	os.Args = os.Args[1:]
-	c, err := NewClient(cfg, log)
+	flag.Parse()
+	c, err := NewClient(cfg, log, licenseKey)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
-	flag.Parse()
 	switch cmd {
 	case "Login":
 		err = c.Login(userName, password)

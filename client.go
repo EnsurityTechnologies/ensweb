@@ -2,7 +2,12 @@ package ensweb
 
 import (
 	"bytes"
+	"crypto/ecdh"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,20 +24,29 @@ import (
 	"time"
 
 	"github.com/EnsurityTechnologies/config"
+	"github.com/EnsurityTechnologies/helper/jsonutil"
 	"github.com/EnsurityTechnologies/logger"
+	"github.com/EnsurityTechnologies/uuid"
 )
 
 // Client : Client struct
 type Client struct {
-	config         *config.Config
-	log            logger.Logger
-	address        string
-	addr           *url.URL
-	hc             *http.Client
-	th             TokenHelper
-	defaultTimeout time.Duration
-	token          string
-	cookies        []*http.Cookie
+	config          *config.Config
+	log             logger.Logger
+	address         string
+	addr            *url.URL
+	hc              *http.Client
+	th              TokenHelper
+	defaultTimeout  time.Duration
+	token           string
+	cookies         []*http.Cookie
+	secureAPI       bool
+	pk              *ecdh.PrivateKey
+	publicKey       string
+	licenseKey      string
+	serverPublicKey string
+	ss              string
+	jid             string
 }
 
 type ClientOptions = func(*Client) error
@@ -51,6 +65,50 @@ func SetClientTokenHelper(filename string) ClientOptions {
 			return err
 		}
 		c.th = th
+		return nil
+	}
+}
+
+func EnableClientSecureAPI(licenseKey string) ClientOptions {
+	return func(c *Client) error {
+		c.secureAPI = true
+		c.licenseKey = licenseKey
+		key, err := ecdh.P256().GenerateKey(rand.Reader)
+		if err != nil {
+			c.log.Error("failed to generate private key", "err", err)
+			return err
+		}
+		c.pk = key
+		pub := c.pk.PublicKey().Bytes()
+		c.publicKey = base64.StdEncoding.EncodeToString(pub)
+		c.log.Info("Public key : " + c.publicKey)
+		req, err := c.JSONRequest("GET", GetPublicKeyAPI, nil)
+		if err != nil {
+			c.log.Error("failed to create json request", "err", err)
+			return err
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			c.log.Error("failed to get server public key, failed to get response", "err", err)
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNoContent {
+			c.log.Error("failed to get server public key, no response from server")
+			return fmt.Errorf("failed to get server public key, no response from server")
+		}
+		var pr PublicKeyResponse
+		err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
+		if err != nil {
+			c.log.Error("failed to get server public key, json unmarshell failed", "err", err)
+			return err
+		}
+		c.serverPublicKey = pr.PublicKey
+		err = c.getSharedSecret()
+		if err != nil {
+			c.log.Error("failed to generate shared secret", "err", err)
+			return err
+		}
 		return nil
 	}
 }
@@ -84,22 +142,24 @@ func NewClient(config *config.Config, log logger.Logger, options ...ClientOption
 		return Client{}, err
 	}
 
-	tc := Client{
+	c := Client{
 		config:  config,
 		log:     clog,
 		address: address,
 		addr:    addr,
 		hc:      hc,
+		jid:     uuid.New().String(),
 	}
 
 	for _, op := range options {
-		err = op(&tc)
+		err = op(&c)
 		if err != nil {
 			clog.Error("failed in setting the option", "err", err)
 			return Client{}, err
 		}
 	}
-	return tc, nil
+
+	return c, nil
 }
 
 func (c *Client) JSONRequest(method string, requestPath string, model interface{}) (*http.Request, error) {
@@ -256,4 +316,121 @@ func (c *Client) ParseMutilform(resp *http.Response, dirPath string) ([]string, 
 		}
 	}
 	return paramFiles, paramTexts, nil
+}
+
+func (c *Client) getSharedSecret() error {
+	if c.ss != "" {
+		return nil
+	}
+	pb, err := base64.StdEncoding.DecodeString(c.serverPublicKey)
+	if err != nil {
+		c.log.Error("invalid pubkey, failed to decode base 64 string", "err", err)
+		return err
+	}
+	pub, err := ecdh.P256().NewPublicKey(pb)
+	if err != nil {
+		c.log.Error("invalid pubkey, failed to frame pubkey", "err", err)
+		return err
+	}
+	kb, err := c.pk.ECDH(pub)
+	if err != nil {
+		c.log.Error("failed to create shared secret", "err", err)
+		return err
+	}
+	ss := sha256.Sum256(kb)
+	c.ss = hex.EncodeToString(ss[:])
+	return nil
+}
+
+func (c *Client) SendJSON(method string, path string, auth bool, headers map[string]string, in interface{}, out interface{}, errout interface{}, timeout ...time.Duration) error {
+	var req *http.Request
+	var err error
+	if c.secureAPI {
+		var sd SecureData
+		if in != nil {
+			sd.Data, err = encryptModel(c.ss, in)
+			if err != nil {
+				c.log.Error("failed to encrypt input model", "err", err)
+				return err
+			}
+			req, err = c.JSONRequest(method, path, sd)
+		} else {
+			req, err = c.JSONRequest(method, path, nil)
+		}
+		if err != nil {
+			c.log.Error("failed to create json request", "err", err)
+			return err
+		}
+		reqID := RequestID{
+			ID:        uuid.New().String(),
+			JourneyID: c.jid,
+			TS:        time.Now().Unix(),
+			AppID:     "goclient",
+		}
+
+		rid, err := encryptModel(c.ss, reqID)
+		if err != nil {
+			c.log.Error("failed to encrypt request model", "err", err)
+			return err
+		}
+		req.Header.Add(RequestIDHdr, rid)
+		req.Header.Add(LicenseKeyHdr, c.licenseKey)
+		req.Header.Add(PublicKeyHdr, c.publicKey)
+	} else {
+		req, err = c.JSONRequest(method, path, in)
+		if err != nil {
+			c.log.Error("failed to create json request", "err", err)
+			return err
+		}
+	}
+
+	if auth {
+		c.SetAuthorization(req, c.GetToken())
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := c.Do(req, timeout...)
+	if err != nil {
+		c.log.Error("failed to get response from the server", "err", err)
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if resp.StatusCode == http.StatusOK || errout == nil {
+		if c.secureAPI {
+			var sd SecureData
+			err = jsonutil.DecodeJSONFromReader(resp.Body, &sd)
+			if err != nil {
+				c.log.Error("failed to parse json output", "err", err)
+				return err
+			}
+			err = decryptModel(c.ss, sd.Data, out)
+			if err != nil {
+				c.log.Error("failed to decrypt model", "err", err)
+				return err
+			}
+		} else {
+			err = jsonutil.DecodeJSONFromReader(resp.Body, out)
+			if err != nil {
+				c.log.Error("failed to parse json output", "err", err)
+				return err
+			}
+		}
+	} else {
+		err = jsonutil.DecodeJSONFromReader(resp.Body, errout)
+		if err != nil {
+			c.log.Error("failed to parse json output", "err", err)
+			return err
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		str := fmt.Sprintf("request failed with status : %d", resp.StatusCode)
+		c.log.Error(str)
+		return fmt.Errorf(str)
+	}
+	return nil
+
 }

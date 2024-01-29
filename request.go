@@ -32,6 +32,9 @@ type Request struct {
 	Model       interface{}
 	Headers     http.Header
 	TenantID    uuid.UUID
+	ss          string
+	sd          string
+	redID       string
 	r           *http.Request
 	w           http.ResponseWriter `json:"-" sentinel:""`
 }
@@ -53,7 +56,7 @@ type Connection struct {
 	ConnState *tls.ConnectionState `sentinel:""`
 }
 
-//ipRange - a structure that holds the start and end of a range of ip addresses
+// ipRange - a structure that holds the start and end of a range of ip addresses
 type ipRange struct {
 	start net.IP
 	end   net.IP
@@ -192,6 +195,16 @@ func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) *Reques
 		TenantID:    s.getTenantID(r),
 		r:           r,
 		w:           w,
+	}
+
+	if s.secureAPI {
+		if path != GetPublicKeyAPI {
+			req.redID = s.GetReqHeader(req, RequestIDHdr)
+			err := s.getSharedSecret(req)
+			if err != nil {
+				s.log.Error("failed to generate share secret", "err", err)
+			}
+		}
 	}
 
 	return req

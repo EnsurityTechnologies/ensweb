@@ -13,6 +13,9 @@ import (
 	"github.com/EnsurityTechnologies/uuid"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/sessions"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // route declaration
@@ -30,10 +33,19 @@ type Server struct {
 }
 
 // NewServer create new server handle
-func NewServer(cfg *config.Config, log logger.Logger) (*Server, error) {
+func NewServer(cfg *config.Config, log logger.Logger, licenseKey string) (*Server, error) {
 	s := &Server{}
 	var err error
-	s.Server, err = ensweb.NewServer(cfg, nil, log)
+	db, err := gorm.Open(sqlite.Open("db.db"), &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+	if err != nil {
+		log.Error("Failed to open db", err.Error())
+		return nil, err
+	}
+	if licenseKey != "" {
+		s.Server, err = ensweb.NewServer(cfg, nil, log, ensweb.SetDB(db), ensweb.EnableSecureAPI(nil, licenseKey))
+	} else {
+		s.Server, err = ensweb.NewServer(cfg, nil, log, ensweb.SetDB(db))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +88,16 @@ func (s *Server) RegisterRoutes() {
 	// router.HandleFunc(LoginRoute, s.Login)
 	// router.HandleFunc(LoginSessionRoute, s.LoginSession)
 	s.AddRoute(LoginRoute, "POST", s.Login)
-	s.AddRoute(LogoutRoute, "POST", s.SessionAuthHandle(&Token{}, "token-store", "token", s.Logout, nil))
+	if s.IsSecureAPIEnabled() {
+		s.AddRoute(LogoutRoute, "POST", s.BasicAuthHandle(&Token{}, s.Logout, nil, nil))
+		s.AddRoute(HomeRoute, "GET", s.BasicAuthHandle(&Token{}, s.LoginSession, nil, nil))
+	} else {
+		s.AddRoute(LogoutRoute, "POST", s.SessionAuthHandle(&Token{}, "token-store", "token", s.Logout, nil))
+		s.AddRoute(HomeRoute, "GET", s.SessionAuthHandle(&Token{}, "token-store", "token", s.LoginSession, nil))
+	}
+
 	s.AddRoute(RegisterRoute, "POST", s.Register)
-	s.AddRoute(HomeRoute, "GET", s.SessionAuthHandle(&Token{}, "token-store", "token", s.LoginSession, nil))
+
 	s.SetStatic("/", "./ui/build/")
 }
 
@@ -124,11 +143,13 @@ func (s *Server) Login(req *ensweb.Request) *ensweb.Result {
 	token := s.GenerateJWTToken(claims)
 
 	response := Response{
+		BaseResponse: ensweb.BaseResponse{
+			Status:  true,
+			Message: "user logged in successfully",
+		},
 		Token: token,
 	}
-
 	s.SetSessionCookies(req, "token-store", "token", token)
-
 	return s.RenderJSON(req, response, http.StatusOK)
 }
 
@@ -210,6 +231,10 @@ func (s *Server) Register(req *ensweb.Request) *ensweb.Result {
 	token := s.GenerateJWTToken(claims)
 
 	response := Response{
+		BaseResponse: ensweb.BaseResponse{
+			Status:  true,
+			Message: "user registered successfully",
+		},
 		Token: token,
 	}
 
@@ -241,7 +266,10 @@ func (s *Server) LoginSession(req *ensweb.Request) *ensweb.Result {
 	// }
 
 	response := Response{
-		Message: "Valid User Session : " + claims.UserName,
+		BaseResponse: ensweb.BaseResponse{
+			Status:  true,
+			Message: "Valid User Session : " + claims.UserName,
+		},
 	}
 
 	return s.RenderJSON(req, response, http.StatusOK)

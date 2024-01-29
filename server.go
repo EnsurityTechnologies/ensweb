@@ -2,16 +2,23 @@ package ensweb
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"time"
 
-	"github.com/EnsurityTechnologies/adapter"
 	"github.com/EnsurityTechnologies/config"
+	"github.com/EnsurityTechnologies/enscrypt"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 )
 
 const DefaultTimeout = 60 * time.Second
@@ -19,6 +26,12 @@ const DefaultTimeout = 60 * time.Second
 const (
 	DefaultTokenHdr  string = "X-Token"
 	DefaultRawErrHdr string = "X-Raw"
+	PublicKeyHdr     string = "publickey"
+	RequestIDHdr     string = "requestid"
+	LicenseKeyHdr    string = "licensekey"
+)
+const (
+	GetPublicKeyAPI string = "/api/getpublickey"
 )
 
 const (
@@ -46,18 +59,20 @@ type Server struct {
 	mux             *mux.Router
 	log             logger.Logger
 	auditLog        logger.Logger
-	db              *adapter.Adapter
+	db              *gorm.DB
 	url             string
 	jwtSecret       string
 	rootPath        string
 	publicPath      string
 	prefixPath      string
 	apiKey          string
+	secureAPI       bool
+	pk              *ecdh.PrivateKey
+	publicKey       string
+	licenseKey      string
 	ss              map[string]*SessionStore
 	debugMode       bool
 	sf              ShutdownFunc
-	entities        map[string]Entity
-	entityConfig    EntityConfig
 	defaultTenantID uuid.UUID
 	tcb             GetTenantCBFunc
 }
@@ -77,6 +92,10 @@ type StatusMsg struct {
 	Message string `json:"Message"`
 }
 
+type SecureData struct {
+	Data string `json:"Data"`
+}
+
 type ServerOptions = func(*Server) error
 
 func SetServerTimeout(timeout time.Duration) ServerOptions {
@@ -84,6 +103,33 @@ func SetServerTimeout(timeout time.Duration) ServerOptions {
 		s.s.IdleTimeout = timeout
 		s.s.ReadTimeout = timeout
 		s.s.WriteTimeout = timeout
+		return nil
+	}
+}
+
+func SetDB(db *gorm.DB) ServerOptions {
+	return func(s *Server) error {
+		s.db = db
+		return nil
+	}
+}
+
+func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
+	return func(s *Server) error {
+		s.secureAPI = true
+		s.licenseKey = licenseKey
+		if s.pk == nil {
+			key, err := ecdh.P256().GenerateKey(rand.Reader)
+			if err != nil {
+				s.log.Error("failed to generate private key")
+				return err
+			}
+			s.pk = key
+		} else {
+			s.pk = pk
+		}
+		pub := s.pk.PublicKey().Bytes()
+		s.publicKey = base64.StdEncoding.EncodeToString(pub)
 		return nil
 	}
 }
@@ -107,15 +153,6 @@ func NewServer(cfg *config.Config, serverCfg *ServerConfig, log logger.Logger, o
 		serverURL = "https://" + addr
 	}
 	slog := log.Named("enswebserver")
-	var db *adapter.Adapter
-	var err error
-	if cfg.DBType != "" {
-		db, err = adapter.NewAdapter(cfg)
-		if err != nil {
-			slog.Error("failed to DB adapter", "err", err)
-			return Server{}, err
-		}
-	}
 
 	ts := Server{
 		s:          s,
@@ -123,32 +160,39 @@ func NewServer(cfg *config.Config, serverCfg *ServerConfig, log logger.Logger, o
 		serverCfg:  serverCfg,
 		mux:        mux.NewRouter(),
 		log:        slog,
-		db:         db,
 		url:        serverURL,
 		rootPath:   "views/",
 		publicPath: "public/",
 		ss:         make(map[string]*SessionStore),
-		entities:   make(map[string]Entity),
-		entityConfig: EntityConfig{
-			DefaultTenantName:    "ensweb",
-			DefaultAdminName:     "Admin",
-			DefaultAdminPassword: "admin@123",
-			TenantTableName:      "TenantTable",
-			UserTableName:        "UserTable",
-			RoleTableName:        "RoleTable",
-			UserRoleTableName:    "UserRoleTable",
-		},
 	}
 
 	for _, op := range options {
-		err = op(&ts)
+		err := op(&ts)
 		if err != nil {
 			slog.Error("failed in setting the option", "err", err)
 			return Server{}, err
 		}
 	}
 
+	if ts.secureAPI {
+		ts.AddRoute(GetPublicKeyAPI, "GET", ts.getPublicKeyAPI)
+	}
+
 	return ts, nil
+}
+
+func (s *Server) getPublicKeyAPI(req *Request) *Result {
+	pr := PublicKeyResponse{
+		BaseResponse: BaseResponse{
+			Status: true,
+		},
+		PublicKey: s.publicKey,
+	}
+	return s.RenderNormalJSON(req, pr, http.StatusOK)
+}
+
+func (s *Server) IsSecureAPIEnabled() bool {
+	return s.secureAPI
 }
 
 func (s *Server) SetDebugMode() {
@@ -223,11 +267,65 @@ func (s *Server) SetTenantCBFunc(tcb GetTenantCBFunc) {
 }
 
 // GetDB will return DB
-func (s *Server) GetDB() *adapter.Adapter {
+func (s *Server) GetDB() *gorm.DB {
 	return s.db
 }
 
 // GetDB will return DB
 func (s *Server) GetServerURL() string {
 	return s.url
+}
+
+func (s *Server) getSharedSecret(req *Request) error {
+	if req.ss != "" {
+		return nil
+	}
+	pubkey := s.GetReqHeader(req, PublicKeyHdr)
+	s.log.Info("public key : " + pubkey)
+	pb, err := base64.StdEncoding.DecodeString(pubkey)
+	if err != nil {
+		s.log.Error("invalid pubkey, failed to decode base 64 string", "err", err)
+		return err
+	}
+	pub, err := ecdh.P256().NewPublicKey(pb)
+	if err != nil {
+		s.log.Error("invalid pubkey, failed to frame pubkey", "err", err)
+		return err
+	}
+	kb, err := s.pk.ECDH(pub)
+	if err != nil {
+		s.log.Error("failed to create shared secret", "err", err)
+		return err
+	}
+	ss := sha256.Sum256(kb)
+	req.ss = hex.EncodeToString(ss[:])
+	return nil
+}
+
+func encryptModel(ss string, model interface{}) (string, error) {
+	data, err := json.Marshal(model)
+	if err != nil {
+		return "", err
+	}
+	eb, err := enscrypt.Seal(ss, data)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(eb), nil
+}
+
+func decryptModel(ss string, data string, model interface{}) error {
+	eb, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return err
+	}
+	db, err := enscrypt.UnSeal(ss, eb)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(db, model)
+	if err != nil {
+		return err
+	}
+	return nil
 }
