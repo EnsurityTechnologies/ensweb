@@ -20,7 +20,6 @@ func enableCors(w *http.ResponseWriter) {
 }
 
 func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result {
-
 	if s.debugMode {
 		enableCors(&req.w)
 	}
@@ -36,8 +35,46 @@ func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result
 		res.Status = http.StatusNoContent
 		req.w.WriteHeader(http.StatusNoContent)
 	} else {
-		req.w.WriteHeader(status)
 		enc := json.NewEncoder(req.w)
+		if s.secureAPI {
+			err := s.getSharedSecret(req)
+			if err != nil {
+				req.w.WriteHeader(http.StatusInternalServerError)
+				res.Status = http.StatusInternalServerError
+				return res
+			}
+			data, err := encryptModel(req.ss, model)
+			if err != nil {
+				s.log.Error("failed to encrypt output model", "err", err)
+			}
+			sd := SecureData{
+				Data: data,
+			}
+			req.w.WriteHeader(status)
+			enc.Encode(sd)
+		} else {
+			req.w.WriteHeader(status)
+			enc.Encode(model)
+		}
+	}
+	return res
+}
+
+func (s *Server) RenderNormalJSON(req *Request, model interface{}, status int) *Result {
+	if s.debugMode {
+		enableCors(&req.w)
+	}
+	req.w.Header().Set("Content-Type", "application/json")
+	res := &Result{
+		Status: status,
+		Done:   true,
+	}
+	if model == nil {
+		res.Status = http.StatusNoContent
+		req.w.WriteHeader(http.StatusNoContent)
+	} else {
+		enc := json.NewEncoder(req.w)
+		req.w.WriteHeader(status)
 		enc.Encode(model)
 	}
 	return res
@@ -47,8 +84,8 @@ func (s *Server) RenderJSONError(req *Request, status int, errMsg string, logMsg
 	if logMsg != "" {
 		s.log.Error(logMsg, args...)
 	}
-	model := ErrMessage{
-		Error: errMsg,
+	model := BaseResponse{
+		Message: errMsg,
 	}
 	return s.RenderJSON(req, model, status)
 }
