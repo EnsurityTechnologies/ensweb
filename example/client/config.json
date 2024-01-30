@@ -1,6 +1,0 @@
-{
-    "server_address": "localhost",
-    "server_port": "9009",
-    "log_file": "log.txt",
-    "production": "false"
-}

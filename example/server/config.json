@@ -1,9 +1,0 @@
-{
-    "db_address": "server.db",
-    "db_type": "Sqlite3",
-    "host_address": "localhost",
-    "host_port": "9009",
-    "log_file": "log.txt",
-    "production": "false",
-    "token_secret":   "TokenSecret"
-}

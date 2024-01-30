@@ -181,6 +181,14 @@ func NewServer(cfg *config.Config, serverCfg *ServerConfig, log logger.Logger, o
 	return ts, nil
 }
 
+// ShowAccount godoc
+// @Summary      Get the public key of the server
+// @Description  Get the public key of the server
+// @Tags         general
+// @Accept       json
+// @Produce      json
+// @Success      200 {object}  PublicKeyResponse
+// @Router       /api/getpublickey [get]
 func (s *Server) getPublicKeyAPI(req *Request) *Result {
 	pr := PublicKeyResponse{
 		BaseResponse: BaseResponse{
