@@ -23,7 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EnsurityTechnologies/config"
 	"github.com/EnsurityTechnologies/helper/jsonutil"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
@@ -31,7 +30,7 @@ import (
 
 // Client : Client struct
 type Client struct {
-	config          *config.Config
+	cfg             *Config
 	log             logger.Logger
 	address         string
 	addr            *url.URL
@@ -114,17 +113,17 @@ func EnableClientSecureAPI(licenseKey string) ClientOptions {
 }
 
 // NewClient : Create new client handle
-func NewClient(config *config.Config, log logger.Logger, options ...ClientOptions) (Client, error) {
+func NewClient(cfg *Config, log logger.Logger, options ...ClientOptions) (Client, error) {
 	var address string
 	var tr *http.Transport
 	clog := log.Named("enswebclient")
-	if config.Production == "true" {
-		address = fmt.Sprintf("https://%s", net.JoinHostPort(config.ServerAddress, config.ServerPort))
+	if cfg.Secure {
+		address = fmt.Sprintf("https://%s", net.JoinHostPort(cfg.Address, cfg.Port))
 		tr = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	} else {
-		address = fmt.Sprintf("http://%s", net.JoinHostPort(config.ServerAddress, config.ServerPort))
+		address = fmt.Sprintf("http://%s", net.JoinHostPort(cfg.Address, cfg.Port))
 		tr = &http.Transport{
 			IdleConnTimeout: 30 * time.Second,
 		}
@@ -143,7 +142,7 @@ func NewClient(config *config.Config, log logger.Logger, options ...ClientOption
 	}
 
 	c := Client{
-		config:  config,
+		cfg:     cfg,
 		log:     clog,
 		address: address,
 		addr:    addr,

@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
-	"github.com/EnsurityTechnologies/config"
 	"github.com/EnsurityTechnologies/enscrypt"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
@@ -53,7 +53,7 @@ type GetTenantCBFunc func(tenantName string) uuid.UUID
 
 // Server defines server
 type Server struct {
-	cfg             *config.Config
+	cfg             *Config
 	serverCfg       *ServerConfig
 	s               *http.Server
 	mux             *mux.Router
@@ -135,11 +135,14 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 }
 
 // NewServer create new server instances
-func NewServer(cfg *config.Config, serverCfg *ServerConfig, log logger.Logger, options ...ServerOptions) (Server, error) {
-	// if os.Getenv("ASPNETCORE_PORT") != "" {
-	// 	cfg.HostPort = os.Getenv("ASPNETCORE_PORT")
-	// }
-	addr := net.JoinHostPort(cfg.HostAddress, cfg.HostPort)
+func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options ...ServerOptions) (Server, error) {
+	// if IIS configured port run the server on localhost
+	if os.Getenv("ASPNETCORE_PORT") != "" {
+		cfg.Address = "localhost"
+		cfg.Port = os.Getenv("ASPNETCORE_PORT")
+		cfg.Secure = false
+	}
+	addr := net.JoinHostPort(cfg.Address, cfg.Port)
 	s := &http.Server{
 		Addr:         addr,
 		IdleTimeout:  DefaultTimeout,
@@ -147,10 +150,16 @@ func NewServer(cfg *config.Config, serverCfg *ServerConfig, log logger.Logger, o
 		WriteTimeout: DefaultTimeout,
 	}
 	var serverURL string
-	if cfg.Production == "false" {
-		serverURL = "http://" + addr
-	} else {
+	if cfg.Secure {
 		serverURL = "https://" + addr
+		if cfg.CertFile == "" {
+			cfg.CertFile = "server.crt"
+		}
+		if cfg.KeyFile == "" {
+			cfg.KeyFile = "server.key"
+		}
+	} else {
+		serverURL = "http://" + addr
 	}
 	slog := log.Named("enswebserver")
 
@@ -225,19 +234,19 @@ func (s *Server) Start() error {
 		return err
 	}
 	connPort := fmt.Sprintf("%d", ln.Addr().(*net.TCPAddr).Port)
-	if connPort != s.cfg.HostPort {
+	if connPort != s.cfg.Port {
 		s.log.Info("Requested port is not available, using the other port", "port", connPort)
-		s.cfg.HostPort = connPort
-		addr := net.JoinHostPort(s.cfg.HostAddress, s.cfg.HostPort)
+		s.cfg.Port = connPort
+		addr := net.JoinHostPort(s.cfg.Address, s.cfg.Port)
 		serverURL := "http://" + addr
-		if s.cfg.Production == "true" {
+		if s.cfg.Secure {
 			serverURL = "https://" + addr
 		}
 		s.url = serverURL
 	}
 	str := fmt.Sprintf("Server running at : %s", s.url)
 	s.log.Info(str)
-	if s.cfg.Production == "true" {
+	if s.cfg.Secure {
 		go s.s.ServeTLS(ln, s.cfg.CertFile, s.cfg.KeyFile)
 		//go s.s.ListenAndServeTLS(s.cfg.CertFile, s.cfg.KeyFile)
 		return nil

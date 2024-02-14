@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/EnsurityTechnologies/helper/jsonutil"
-	"github.com/EnsurityTechnologies/wraperr"
 )
 
 // bufferedReader can be used to replace a request body with a buffered
@@ -117,7 +116,7 @@ func parseJSONRequest(secondary bool, r *http.Request, w http.ResponseWriter, ou
 
 	err := jsonutil.DecodeJSONFromReader(reader, out)
 	if err != nil && err != io.EOF {
-		return nil, wraperr.Wrapf(err, "failed to parse JSON input")
+		return nil, err
 	}
 	if origBody != nil {
 		return ioutil.NopCloser(origBody), err

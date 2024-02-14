@@ -1,10 +1,7 @@
 package ensweb
 
 import (
-	"net/http"
-
 	"github.com/gorilla/mux"
-	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // func (s *Server) SetIndex(dirPath string) {
@@ -21,14 +18,18 @@ func (s *Server) AddPrefixRoute(prefix string, dirpath string, hf HandlerFunc) {
 	s.mux.PathPrefix(prefix).Handler(basicHandleFunc(s, hf))
 }
 
-func (s *Server) EnableSWagger(url string) {
-
-	s.mux.PathPrefix("/swagger/").Handler(httpSwagger.Handler(
-		httpSwagger.URL(url+"/swagger/doc.json"),
-		httpSwagger.DeepLinking(true),
-		httpSwagger.DocExpansion("none"),
-		httpSwagger.DomID("swagger-ui"))).Methods(http.MethodGet)
+func (s *Server) GetMux() *mux.Router {
+	return s.mux
 }
+
+// func (s *Server) EnableSWagger(url string) {
+
+// 	s.mux.PathPrefix("/swagger/").Handler(httpSwagger.Handler(
+// 		httpSwagger.URL(url+"/swagger/doc.json"),
+// 		httpSwagger.DeepLinking(true),
+// 		httpSwagger.DocExpansion("none"),
+// 		httpSwagger.DomID("swagger-ui"))).Methods(http.MethodGet)
+// }
 
 // func (s *Server) SetStatic(dir string) {
 // 	s.publicPath = dir
