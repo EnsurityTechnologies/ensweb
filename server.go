@@ -298,7 +298,6 @@ func (s *Server) getSharedSecret(req *Request) error {
 		return nil
 	}
 	pubkey := s.GetReqHeader(req, PublicKeyHdr)
-	s.log.Info("public key : " + pubkey)
 	pb, err := base64.StdEncoding.DecodeString(pubkey)
 	if err != nil {
 		s.log.Error("invalid pubkey, failed to decode base 64 string", "err", err)

@@ -80,7 +80,6 @@ func EnableClientSecureAPI(licenseKey string) ClientOptions {
 		c.pk = key
 		pub := c.pk.PublicKey().Bytes()
 		c.publicKey = base64.StdEncoding.EncodeToString(pub)
-		c.log.Info("Public key : " + c.publicKey)
 		req, err := c.JSONRequest("GET", GetPublicKeyAPI, nil)
 		if err != nil {
 			c.log.Error("failed to create json request", "err", err)
