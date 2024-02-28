@@ -340,7 +340,7 @@ func (c *Client) getSharedSecret() error {
 	return nil
 }
 
-func (c *Client) SendJSON(method string, path string, auth bool, headers map[string]string, in interface{}, out interface{}, errout interface{}, timeout ...time.Duration) error {
+func (c *Client) SendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, timeout ...time.Duration) error {
 	var req *http.Request
 	var err error
 	if c.secureAPI {
@@ -387,6 +387,13 @@ func (c *Client) SendJSON(method string, path string, auth bool, headers map[str
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
+	}
+	if querry != nil {
+		q := req.URL.Query()
+		for k, v := range querry {
+			q.Add(k, v)
+		}
+		req.URL.RawQuery = q.Encode()
 	}
 	resp, err := c.Do(req, timeout...)
 	if err != nil {
