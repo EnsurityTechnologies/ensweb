@@ -134,6 +134,13 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 	}
 }
 
+func EnableDebug() ServerOptions {
+	return func(s *Server) error {
+		s.debugMode = true
+		return nil
+	}
+}
+
 // NewServer create new server instances
 func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options ...ServerOptions) (Server, error) {
 	// if IIS configured port run the server on localhost
