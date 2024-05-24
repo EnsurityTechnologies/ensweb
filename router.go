@@ -10,6 +10,7 @@ import (
 
 func (s *Server) AddRoute(path string, method string, hf HandlerFunc) {
 	s.mux.Handle(path, basicHandleFunc(s, hf)).Methods(method)
+	s.mux.Handle(path, basicPreflightHandleFunc(s)).Methods("OPTIONS")
 }
 
 func (s *Server) AddPrefixRoute(prefix string, dirpath string, hf HandlerFunc) {

@@ -13,15 +13,15 @@ import (
 	"strconv"
 )
 
-func enableCors(w *http.ResponseWriter) {
+func (s *Server) enableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 	(*w).Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With")
+	(*w).Header().Set("Access-Control-Allow-Headers", s.allowHeaders)
 }
 
 func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result {
 	if s.debugMode {
-		enableCors(&req.w)
+		s.enableCors(&req.w)
 	}
 
 	req.w.Header().Set("Content-Type", "application/json")
@@ -62,7 +62,7 @@ func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result
 
 func (s *Server) RenderNormalJSON(req *Request, model interface{}, status int) *Result {
 	if s.debugMode {
-		enableCors(&req.w)
+		s.enableCors(&req.w)
 	}
 	req.w.Header().Set("Content-Type", "application/json")
 	res := &Result{
@@ -125,7 +125,7 @@ func (s *Server) RenderTemplate(req *Request, renderPath string, model interface
 func (s *Server) RenderFile(req *Request, fileName string, attachment bool) *Result {
 
 	if s.debugMode {
-		enableCors(&req.w)
+		s.enableCors(&req.w)
 	}
 
 	res := &Result{
@@ -176,7 +176,7 @@ func (s *Server) RenderFile(req *Request, fileName string, attachment bool) *Res
 func (s *Server) RenderMultiFormFile(req *Request, field map[string]string, fileName map[string]string) *Result {
 
 	if s.debugMode {
-		enableCors(&req.w)
+		s.enableCors(&req.w)
 	}
 
 	res := &Result{
@@ -228,7 +228,7 @@ func (s *Server) RenderMultiFormFile(req *Request, field map[string]string, file
 func (s *Server) RenderImage(req *Request, contentType string, img string) *Result {
 
 	if s.debugMode {
-		enableCors(&req.w)
+		s.enableCors(&req.w)
 	}
 	req.w.Header().Set("Content-Type", contentType)
 

@@ -72,6 +72,7 @@ type Server struct {
 	licenseKey      string
 	ss              map[string]*SessionStore
 	debugMode       bool
+	allowHeaders    string
 	sf              ShutdownFunc
 	defaultTenantID uuid.UUID
 	tcb             GetTenantCBFunc
@@ -134,9 +135,10 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 	}
 }
 
-func EnableDebug() ServerOptions {
+func EnableDebug(allowHeaders string) ServerOptions {
 	return func(s *Server) error {
 		s.debugMode = true
+		s.allowHeaders = allowHeaders
 		return nil
 	}
 }

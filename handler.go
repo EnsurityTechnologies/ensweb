@@ -164,6 +164,36 @@ func parseFormRequest(r *http.Request) (map[string]interface{}, error) {
 	return data, nil
 }
 
+func basicPreflightHandleFunc(s *Server) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		req := basicRequestFunc(s, w, r)
+
+		if s.debugMode {
+			s.enableCors(&req.w)
+		}
+
+		req.w.Header().Set("Content-Type", "application/json")
+
+		res := &Result{
+			Status: http.StatusOK,
+			Done:   true,
+		}
+		req.w.WriteHeader(http.StatusOK)
+
+		if res != nil && s.auditLog != nil {
+			timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
+			userAgent := r.Header.Get("User-Agent")
+			if res.Done {
+				s.auditLog.Info("HTTP request processed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Status", res.Status, "Duration", timeDuration, "User-Agent", userAgent)
+			} else {
+				s.auditLog.Error("HTTP request failed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Duration", timeDuration, "User-Agent", userAgent)
+			}
+		}
+
+	})
+}
+
 func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -225,7 +255,7 @@ func indexRoute(s *Server, dirPath string) http.Handler {
 		}
 
 		if s.debugMode {
-			enableCors(&w)
+			s.enableCors(&w)
 		}
 
 		fs.ServeHTTP(w, r)

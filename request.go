@@ -198,7 +198,7 @@ func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) *Reques
 	}
 
 	if s.secureAPI {
-		if path != GetPublicKeyAPI {
+		if path != GetPublicKeyAPI && req.Method != "OPTIONS" {
 			req.redID = s.GetReqHeader(req, RequestIDHdr)
 			err := s.getSharedSecret(req)
 			if err != nil {
