@@ -13,7 +13,7 @@ func (s *Server) BasicAuthHandle(claims jwt.Claims, hf HandlerFunc, af AuthFunc,
 			if ef != nil {
 				return ef(req)
 			} else {
-				return s.RenderJSONError(req, http.StatusForbidden, err.Error(), err.Error())
+				return s.RenderJSONError(req, http.StatusUnauthorized, err.Error(), err.Error())
 			}
 		}
 		req.ClientToken.Model = claims
@@ -23,7 +23,7 @@ func (s *Server) BasicAuthHandle(claims jwt.Claims, hf HandlerFunc, af AuthFunc,
 				if ef != nil {
 					return ef(req)
 				} else {
-					return s.RenderJSONError(req, http.StatusForbidden, "Access denined", "Access denied")
+					return s.RenderJSONError(req, http.StatusUnauthorized, "Access denined", "Access denied")
 				}
 			}
 		}
@@ -37,7 +37,7 @@ func (s *Server) APIKeyAuthHandle(hf HandlerFunc, ef HandlerFunc) HandlerFunc {
 			if ef != nil {
 				return ef(req)
 			} else {
-				return s.RenderJSONError(req, http.StatusForbidden, "API Key is not matched", "API Key is not matched")
+				return s.RenderJSONError(req, http.StatusUnauthorized, "API Key is not matched", "API Key is not matched")
 			}
 		}
 		req.ClientToken.APIKeyVerified = true
@@ -53,7 +53,7 @@ func (s *Server) SessionAuthHandle(claims jwt.Claims, sessionName string, sessio
 			if ef != nil {
 				return ef(req)
 			} else {
-				return s.RenderJSONError(req, http.StatusForbidden, "invalid session", "invalid session")
+				return s.RenderJSONError(req, http.StatusUnauthorized, "invalid session", "invalid session")
 			}
 		}
 		err := s.ValidateJWTToken(token.(string), claims)
@@ -61,7 +61,7 @@ func (s *Server) SessionAuthHandle(claims jwt.Claims, sessionName string, sessio
 			if ef != nil {
 				return ef(req)
 			} else {
-				return s.RenderJSONError(req, http.StatusForbidden, err.Error(), err.Error())
+				return s.RenderJSONError(req, http.StatusUnauthorized, err.Error(), err.Error())
 			}
 		}
 		req.ClientToken.Model = claims
