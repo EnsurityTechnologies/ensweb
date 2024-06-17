@@ -7,10 +7,11 @@ import (
 )
 
 type TokenHelper interface {
-	Path() string
 	Erase() error
-	Get() (string, error)
-	Store(string) error
+	GetAccessToken() (string, error)
+	StoreAccessToken(string) error
+	GetRefreshToken() (string, error)
+	StoreRefreshToken(string) error
 }
 
 type TokenType uint8
@@ -38,6 +39,10 @@ func (t TokenType) String() string {
 	default:
 		panic("unreachable")
 	}
+}
+
+func (s *Server) SetTokenSecret(secret string) {
+	s.jwtSecret = secret
 }
 
 // GenerateJWTToken will generate JWT token

@@ -28,6 +28,8 @@ import (
 	"github.com/EnsurityTechnologies/uuid"
 )
 
+type AuthenticateFunc func() error
+
 // Client : Client struct
 type Client struct {
 	cfg             *Config
@@ -38,6 +40,7 @@ type Client struct {
 	th              TokenHelper
 	defaultTimeout  time.Duration
 	token           string
+	rtoken          string
 	cookies         []*http.Cookie
 	secureAPI       bool
 	pk              *ecdh.PrivateKey
@@ -57,9 +60,9 @@ func SetClientDefaultTimeout(timeout time.Duration) ClientOptions {
 	}
 }
 
-func SetClientTokenHelper(filename string) ClientOptions {
+func SetClientTokenHelper(accessFilename string, refreshFilename string) ClientOptions {
 	return func(c *Client) error {
-		th, err := NewInternalTokenHelper(filename)
+		th, err := NewInternalTokenHelper(accessFilename, refreshFilename)
 		if err != nil {
 			return err
 		}
@@ -255,15 +258,23 @@ func (c *Client) GetCookies() []*http.Cookie {
 
 func (c *Client) SetToken(token string) error {
 	if c.th != nil {
-		return c.th.Store(token)
+		return c.th.StoreAccessToken(token)
 	}
 	c.token = token
 	return nil
 }
 
+func (c *Client) SetRefreshToken(token string) error {
+	if c.th != nil {
+		return c.th.StoreRefreshToken(token)
+	}
+	c.rtoken = token
+	return nil
+}
+
 func (c *Client) GetToken() string {
 	if c.th != nil {
-		tk, err := c.th.Get()
+		tk, err := c.th.GetAccessToken()
 		if err != nil {
 			return "InvalidToken"
 		} else {
@@ -271,6 +282,18 @@ func (c *Client) GetToken() string {
 		}
 	}
 	return c.token
+}
+
+func (c *Client) GetRefreshToken() string {
+	if c.th != nil {
+		tk, err := c.th.GetRefreshToken()
+		if err != nil {
+			return "InvalidToken"
+		} else {
+			return tk
+		}
+	}
+	return c.rtoken
 }
 
 func (c *Client) ParseMutilform(resp *http.Response, dirPath string) ([]string, map[string]string, error) {
@@ -340,7 +363,7 @@ func (c *Client) getSharedSecret() error {
 	return nil
 }
 
-func (c *Client) SendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, timeout ...time.Duration) error {
+func (c *Client) sendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, timeout ...time.Duration) (int, error) {
 	var req *http.Request
 	var err error
 	if c.secureAPI {
@@ -349,7 +372,7 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 			sd.Data, err = encryptModel(c.ss, in)
 			if err != nil {
 				c.log.Error("failed to encrypt input model", "err", err)
-				return err
+				return 0, err
 			}
 			req, err = c.JSONRequest(method, path, sd)
 		} else {
@@ -357,7 +380,7 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 		}
 		if err != nil {
 			c.log.Error("failed to create json request", "err", err)
-			return err
+			return 0, err
 		}
 		reqID := RequestID{
 			ID:        uuid.New().String(),
@@ -369,7 +392,7 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 		rid, err := encryptModel(c.ss, reqID)
 		if err != nil {
 			c.log.Error("failed to encrypt request model", "err", err)
-			return err
+			return 0, err
 		}
 		req.Header.Add(RequestIDHdr, rid)
 		req.Header.Add(LicenseKeyHdr, c.licenseKey)
@@ -378,7 +401,7 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 		req, err = c.JSONRequest(method, path, in)
 		if err != nil {
 			c.log.Error("failed to create json request", "err", err)
-			return err
+			return 0, err
 		}
 	}
 
@@ -398,11 +421,11 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 	resp, err := c.Do(req, timeout...)
 	if err != nil {
 		c.log.Error("failed to get response from the server", "err", err)
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.StatusCode, nil
 	}
 	if resp.StatusCode == http.StatusOK || errout == nil {
 		if c.secureAPI {
@@ -410,32 +433,47 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 			err = jsonutil.DecodeJSONFromReader(resp.Body, &sd)
 			if err != nil {
 				c.log.Error("failed to parse json output", "err", err)
-				return err
+				return resp.StatusCode, err
 			}
 			err = decryptModel(c.ss, sd.Data, out)
 			if err != nil {
 				c.log.Error("failed to decrypt model", "err", err)
-				return err
+				return resp.StatusCode, err
 			}
 		} else {
 			err = jsonutil.DecodeJSONFromReader(resp.Body, out)
 			if err != nil {
 				c.log.Error("failed to parse json output", "err", err)
-				return err
+				return resp.StatusCode, err
 			}
 		}
 	} else {
 		err = jsonutil.DecodeJSONFromReader(resp.Body, errout)
 		if err != nil {
 			c.log.Error("failed to parse json output", "err", err)
-			return err
+			return resp.StatusCode, err
 		}
 	}
-	if resp.StatusCode != http.StatusOK {
-		str := fmt.Sprintf("request failed with status : %d", resp.StatusCode)
-		c.log.Error(str)
-		return fmt.Errorf(str)
+	return resp.StatusCode, nil
+
+}
+
+func (c *Client) SendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, af AuthenticateFunc, timeout ...time.Duration) error {
+	statusCode, err := c.sendJSON(method, path, auth, querry, headers, in, out, errout, timeout...)
+	if err != nil {
+		return err
+	}
+	if statusCode == http.StatusUnauthorized {
+		if af != nil {
+			c.log.Info("Calling authenticate function")
+			err = af()
+			if err == nil {
+				_, err = c.sendJSON(method, path, auth, querry, headers, in, out, errout, timeout...)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
-
 }

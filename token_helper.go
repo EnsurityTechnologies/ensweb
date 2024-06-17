@@ -14,36 +14,31 @@ import (
 
 var _ TokenHelper = (*InternalTokenHelper)(nil)
 
-// InternalTokenHelper fulfills the TokenHelper interface when no external
-// token-helper is configured, and avoids shelling out
 type InternalTokenHelper struct {
-	tokenPath string
-	homeDir   string
-	filename  string
+	accessTokenPath  string
+	refreshTokenPath string
+	homeDir          string
+	accessFileName   string
+	refreshFileName  string
 }
 
-func NewInternalTokenHelper(filename string) (*InternalTokenHelper, error) {
+func NewInternalTokenHelper(accessFileName string, refreshFileName string) (*InternalTokenHelper, error) {
 	homeDir, err := homedir.Dir()
 	if err != nil {
 		panic(fmt.Sprintf("error getting user's home directory: %v", err))
 	}
-	return &InternalTokenHelper{homeDir: homeDir, filename: filename}, err
+	ifh := &InternalTokenHelper{
+		homeDir:          homeDir,
+		accessFileName:   accessFileName,
+		refreshFileName:  refreshFileName,
+		accessTokenPath:  filepath.Join(homeDir, accessFileName),
+		refreshTokenPath: filepath.Join(homeDir, refreshFileName),
+	}
+	return ifh, nil
 }
 
-// populateTokenPath figures out the token path using homedir to get the user's
-// home directory
-func (i *InternalTokenHelper) populateTokenPath() {
-	i.tokenPath = filepath.Join(i.homeDir, i.filename)
-}
-
-func (i *InternalTokenHelper) Path() string {
-	return i.tokenPath
-}
-
-// Get gets the value of the stored token, if any
-func (i *InternalTokenHelper) Get() (string, error) {
-	i.populateTokenPath()
-	f, err := os.Open(i.tokenPath)
+func (i *InternalTokenHelper) GetAccessToken() (string, error) {
+	f, err := os.Open(i.accessTokenPath)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -60,12 +55,8 @@ func (i *InternalTokenHelper) Get() (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-// Store stores the value of the token to the file.  We always overwrite any
-// existing file atomically to ensure that ownership and permissions are set
-// appropriately.
-func (i *InternalTokenHelper) Store(input string) error {
-	i.populateTokenPath()
-	tmpFile := i.tokenPath + ".tmp"
+func (i *InternalTokenHelper) StoreAccessToken(input string) error {
+	tmpFile := i.accessTokenPath + ".tmp"
 	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
@@ -81,22 +72,53 @@ func (i *InternalTokenHelper) Store(input string) error {
 	if err != nil {
 		return err
 	}
-
-	// We don't care so much about atomic writes here.  We're using this package
-	// because we don't have a portable way of verifying that the target file
-	// is owned by the correct user.  The simplest way of ensuring that is
-	// to simply re-write it, and the simplest way to ensure that we don't
-	// damage an existing working file due to error is the write-rename pattern.
-	// os.Rename on Windows will return an error if the target already exists.
-	return atomic.ReplaceFile(tmpFile, i.tokenPath)
+	return atomic.ReplaceFile(tmpFile, i.accessTokenPath)
 }
 
-// Erase erases the value of the token
-func (i *InternalTokenHelper) Erase() error {
-	i.populateTokenPath()
-	if err := os.Remove(i.tokenPath); err != nil && !os.IsNotExist(err) {
-		return err
+func (i *InternalTokenHelper) GetRefreshToken() (string, error) {
+	f, err := os.Open(i.refreshTokenPath)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	buf := bytes.NewBuffer(nil)
+	if _, err := io.Copy(buf, f); err != nil {
+		return "", err
 	}
 
+	return strings.TrimSpace(buf.String()), nil
+}
+
+func (i *InternalTokenHelper) StoreRefreshToken(input string) error {
+	tmpFile := i.refreshTokenPath + ".tmp"
+	f, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	defer os.Remove(tmpFile)
+
+	_, err = io.WriteString(f, input)
+	if err != nil {
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+	return atomic.ReplaceFile(tmpFile, i.refreshTokenPath)
+}
+
+func (i *InternalTokenHelper) Erase() error {
+	if err := os.Remove(i.accessTokenPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(i.refreshTokenPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
