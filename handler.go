@@ -212,7 +212,7 @@ func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 				err := decryptModel(req.ss, req.redID, &rid)
 				if err != nil {
 					errAuth = true
-					res = s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID")
+					res = s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID", "err", err)
 				}
 				// ::TODO:: validate request time
 			}

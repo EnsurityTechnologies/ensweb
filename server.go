@@ -119,7 +119,7 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 	return func(s *Server) error {
 		s.secureAPI = true
 		s.licenseKey = licenseKey
-		if s.pk == nil {
+		if pk == nil {
 			key, err := ecdh.P256().GenerateKey(rand.Reader)
 			if err != nil {
 				s.log.Error("failed to generate private key")
@@ -131,6 +131,7 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 		}
 		pub := s.pk.PublicKey().Bytes()
 		s.publicKey = base64.StdEncoding.EncodeToString(pub)
+		s.log.Info("Server Public Key : " + s.publicKey)
 		return nil
 	}
 }
