@@ -5,6 +5,8 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,16 +14,24 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/EnsurityTechnologies/certs"
 	"github.com/EnsurityTechnologies/enscrypt"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
 	"github.com/gorilla/mux"
+	"github.com/jefferai/isbadcipher"
 	"gorm.io/gorm"
 )
 
-const DefaultTimeout = 60 * time.Second
+const (
+	DefaultTimeout           = 60 * time.Second
+	DefaultIdleTimeout       = 5 * time.Minute
+	DefaultReadTimeout       = 10 * time.Second
+	DefaultReadHeaderTimeout = 5 * time.Second
+)
 
 const (
 	DefaultTokenHdr  string = "X-Token"
@@ -62,8 +72,7 @@ type Server struct {
 	db              *gorm.DB
 	url             string
 	jwtSecret       string
-	rootPath        string
-	publicPath      string
+	rootDir         string
 	prefixPath      string
 	apiKey          string
 	secureAPI       bool
@@ -76,6 +85,8 @@ type Server struct {
 	sf              ShutdownFunc
 	defaultTenantID uuid.UUID
 	tcb             GetTenantCBFunc
+	tlsCert         *certs.TLSCertificate
+	tlsConfig       *tls.Config
 }
 
 type ServerConfig struct {
@@ -144,6 +155,68 @@ func EnableDebug(allowHeaders string) ServerOptions {
 	}
 }
 
+func SetupServerTimeout(readHeaderTimeoout time.Duration, readTimeout time.Duration, idleTimeout time.Duration) ServerOptions {
+	return func(s *Server) error {
+		s.s.ReadHeaderTimeout = readHeaderTimeoout
+		s.s.ReadTimeout = readTimeout
+		s.s.IdleTimeout = idleTimeout
+		return nil
+	}
+}
+
+func SetupTLSServer(clientAuth tls.ClientAuthType, tlsMinVer uint16, tlsCipherSuites []uint16, clientCACertFile string) ServerOptions {
+	return func(s *Server) error {
+		s.tlsConfig.ClientAuth = clientAuth
+		s.tlsConfig.MinVersion = tlsMinVer
+		if len(tlsCipherSuites) > 0 {
+			// HTTP/2 with TLS 1.2 blacklists several cipher suites.
+			// https://tools.ietf.org/html/rfc7540#appendix-A
+			//
+			// Since the CLI (net/http) automatically uses HTTP/2 with TLS 1.2,
+			// we check here if all or some specified cipher suites are blacklisted.
+			badCiphers := []string{}
+			for _, cipher := range tlsCipherSuites {
+				if isbadcipher.IsBadCipher(cipher) {
+					// Get the name of the current cipher.
+					cipherStr, err := certs.GetCipherName(cipher)
+					if err != nil {
+						s.log.Error("invalid value for tls_cipher_suites", "err", err)
+						return err
+					}
+					badCiphers = append(badCiphers, cipherStr)
+				}
+			}
+			if len(badCiphers) == len(tlsCipherSuites) {
+				s.log.Warn(`WARNING! All cipher suites defined by 'tls_cipher_suites' are blacklisted by the
+				HTTP/2 specification. HTTP/2 communication with TLS 1.2 will not work as intended
+				and Vault will be unavailable via the CLI.
+				Please see https://tools.ietf.org/html/rfc7540#appendix-A for further information.`)
+			} else if len(badCiphers) > 0 {
+				s.log.Warn(`WARNING! The following cipher suites defined by 'tls_cipher_suites' are
+				blacklisted by the HTTP/2 specification,
+				Please see https://tools.ietf.org/html/rfc7540#appendix-A for further information.`, "badCiphers", badCiphers)
+			}
+			s.tlsConfig.CipherSuites = tlsCipherSuites
+		}
+		if clientCACertFile != "" {
+			s.tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+			caPool := x509.NewCertPool()
+			data, err := os.ReadFile(clientCACertFile)
+			if err != nil {
+				s.log.Error("failed to read tls_client_ca_file", "err", err)
+				return err
+			}
+
+			if !caPool.AppendCertsFromPEM(data) {
+				s.log.Error("failed to parse CA certificate in tls_client_ca_file", "err", err)
+				return err
+			}
+			s.tlsConfig.ClientCAs = caPool
+		}
+		return nil
+	}
+}
+
 // NewServer create new server instances
 func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options ...ServerOptions) (Server, error) {
 	// if IIS configured port run the server on localhost
@@ -152,52 +225,61 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 		cfg.Port = os.Getenv("ASPNETCORE_PORT")
 		cfg.Secure = false
 	}
+	if os.Getenv("ENSWEB_CERTIFICATE_PASSWORD") != "" {
+		cfg.KeyPwd = os.Getenv("ENSWEB_CERTIFICATE_PASSWORD")
+	}
 	addr := net.JoinHostPort(cfg.Address, cfg.Port)
-	s := &http.Server{
-		Addr:         addr,
-		IdleTimeout:  DefaultTimeout,
-		ReadTimeout:  DefaultTimeout,
-		WriteTimeout: DefaultTimeout,
+	hs := &http.Server{
+		Addr:              addr,
+		IdleTimeout:       DefaultIdleTimeout,
+		ReadHeaderTimeout: DefaultReadHeaderTimeout,
+		ReadTimeout:       DefaultReadTimeout,
 	}
-	var serverURL string
-	if cfg.Secure {
-		serverURL = "https://" + addr
-		if cfg.CertFile == "" {
-			cfg.CertFile = "server.crt"
+	s := Server{
+		s:         hs,
+		cfg:       cfg,
+		serverCfg: serverCfg,
+		mux:       mux.NewRouter(),
+		log:       log.Named("enswebserver"),
+		ss:        make(map[string]*SessionStore),
+		tlsConfig: &tls.Config{
+			NextProtos: []string{"h2", "http/1.1"},
+		},
+	}
+	if s.cfg.Secure {
+		s.url = "https://" + addr
+		if s.cfg.CertFile == "" {
+			s.cfg.CertFile = "server.crt"
 		}
-		if cfg.KeyFile == "" {
-			cfg.KeyFile = "server.key"
+		if s.cfg.KeyFile == "" {
+			s.cfg.KeyFile = "server.key"
 		}
-	} else {
-		serverURL = "http://" + addr
-	}
-	slog := log.Named("enswebserver")
-
-	ts := Server{
-		s:          s,
-		cfg:        cfg,
-		serverCfg:  serverCfg,
-		mux:        mux.NewRouter(),
-		log:        slog,
-		url:        serverURL,
-		rootPath:   "views/",
-		publicPath: "public/",
-		ss:         make(map[string]*SessionStore),
-	}
-
-	for _, op := range options {
-		err := op(&ts)
+		if strings.HasPrefix(s.cfg.CertFile, ".pfx") {
+			s.tlsCert = certs.NewTLSCertificateFromPFX(s.cfg.CertFile, s.cfg.KeyPwd)
+		} else {
+			s.tlsCert = certs.NewTLSCertificate(s.cfg.CertFile, s.cfg.KeyFile, s.cfg.KeyPwd)
+		}
+		err := s.tlsCert.Reload()
 		if err != nil {
-			slog.Error("failed in setting the option", "err", err)
+			s.log.Error("failed to load certificate", "err", err)
+			return Server{}, err
+		}
+		s.tlsConfig.GetCertificate = s.tlsCert.GetCertificate
+	} else {
+		s.url = "http://" + addr
+	}
+	for _, op := range options {
+		err := op(&s)
+		if err != nil {
+			s.log.Error("failed in setting the option", "err", err)
 			return Server{}, err
 		}
 	}
-
-	if ts.secureAPI {
-		ts.AddRoute(GetPublicKeyAPI, "GET", ts.getPublicKeyAPI)
+	if s.secureAPI {
+		s.AddRoute(GetPublicKeyAPI, "GET", s.getPublicKeyAPI)
 	}
 
-	return ts, nil
+	return s, nil
 }
 
 // ShowAccount godoc
@@ -257,7 +339,12 @@ func (s *Server) Start() error {
 	str := fmt.Sprintf("Server running at : %s", s.url)
 	s.log.Info(str)
 	if s.cfg.Secure {
-		go s.s.ServeTLS(ln, s.cfg.CertFile, s.cfg.KeyFile)
+		if s.tlsConfig != nil {
+			ln = tls.NewListener(ln, s.tlsConfig)
+			go s.s.Serve(ln)
+		} else {
+			go s.s.ServeTLS(ln, s.cfg.CertFile, s.cfg.KeyFile)
+		}
 		//go s.s.ListenAndServeTLS(s.cfg.CertFile, s.cfg.KeyFile)
 		return nil
 	} else {

@@ -363,12 +363,12 @@ func (s *Server) ServerStatic(req *Request) *Result {
 	r := req.r
 	w := req.w
 
-	fs := http.FileServer(http.Dir(s.publicPath))
+	fs := http.FileServer(http.Dir(s.rootDir))
 
 	// If the requested file exists then return if; otherwise return index.html (fileserver default page)
 	if r.URL.Path != "/" {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, s.prefixPath)
-		fullPath := s.publicPath + r.URL.Path
+		fullPath := s.rootDir + r.URL.Path
 		_, err := os.Stat(fullPath)
 		if err != nil {
 			if !os.IsNotExist(err) {

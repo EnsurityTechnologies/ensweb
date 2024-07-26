@@ -102,7 +102,7 @@ func (s *Server) RenderJSONStatus(req *Request, status string, message string, l
 }
 
 func (s *Server) RenderTemplate(req *Request, renderPath string, model interface{}, status int) *Result {
-	templateFile := s.rootPath + renderPath + ".html"
+	templateFile := s.rootDir + renderPath + ".html"
 	fmt.Printf("File : %s\n", templateFile)
 	t, err := template.ParseFiles(templateFile)
 	if err != nil {

@@ -60,12 +60,8 @@ func SetClientDefaultTimeout(timeout time.Duration) ClientOptions {
 	}
 }
 
-func SetClientTokenHelper(accessFilename string, refreshFilename string) ClientOptions {
+func SetClientTokenHelper(th TokenHelper) ClientOptions {
 	return func(c *Client) error {
-		th, err := NewInternalTokenHelper(accessFilename, refreshFilename)
-		if err != nil {
-			return err
-		}
 		c.th = th
 		return nil
 	}
@@ -161,6 +157,32 @@ func NewClient(cfg *Config, log logger.Logger, options ...ClientOptions) (Client
 	}
 
 	return c, nil
+}
+
+func (c *Client) SetUrl(siteUrl string) error {
+	var tr *http.Transport
+	if strings.Contains(siteUrl, "https") {
+		tr = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	} else {
+		tr = &http.Transport{
+			IdleConnTimeout: 30 * time.Second,
+		}
+	}
+	hc := &http.Client{
+		Transport: tr,
+		Timeout:   DefaultTimeout,
+	}
+	addr, err := url.Parse(siteUrl)
+	if err != nil {
+		c.log.Error("failed to parse server address", "err", err)
+		return err
+	}
+	c.addr = addr
+	c.hc = hc
+	c.address = siteUrl
+	return nil
 }
 
 func (c *Client) JSONRequest(method string, requestPath string, model interface{}) (*http.Request, error) {
@@ -443,14 +465,14 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 		} else {
 			err = jsonutil.DecodeJSONFromReader(resp.Body, out)
 			if err != nil {
-				c.log.Error("failed to parse json output", "err", err)
+				c.log.Error("failed to parse json output", "err", err, "statuscode", resp.StatusCode)
 				return resp.StatusCode, err
 			}
 		}
 	} else {
 		err = jsonutil.DecodeJSONFromReader(resp.Body, errout)
 		if err != nil {
-			c.log.Error("failed to parse json output", "err", err)
+			c.log.Error("failed to parse json output", "err", err, "statuscode", resp.StatusCode)
 			return resp.StatusCode, err
 		}
 	}
@@ -460,12 +482,10 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 
 func (c *Client) SendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, af AuthenticateFunc, timeout ...time.Duration) error {
 	statusCode, err := c.sendJSON(method, path, auth, querry, headers, in, out, errout, timeout...)
-	if err != nil {
-		return err
-	}
 	if statusCode == http.StatusUnauthorized {
+		c.log.Debug("unauthorized calling authenticate function")
 		if af != nil {
-			c.log.Info("Calling authenticate function")
+			c.log.Debug("Calling authenticate function")
 			err = af()
 			if err == nil {
 				_, err = c.sendJSON(method, path, auth, querry, headers, in, out, errout, timeout...)
@@ -475,5 +495,9 @@ func (c *Client) SendJSON(method string, path string, auth bool, querry map[stri
 			}
 		}
 	}
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
