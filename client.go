@@ -126,6 +126,14 @@ func NewClient(cfg *Config, log logger.Logger, options ...ClientOptions) (Client
 			IdleConnTimeout: 30 * time.Second,
 		}
 	}
+	if cfg.EnableProxy {
+		url, err := url.Parse(cfg.ProxyUrl)
+		if err != nil {
+			log.Error("failed to create client, failed parse proxy url", "err", err)
+			return Client{}, err
+		}
+		tr.Proxy = http.ProxyURL(url)
+	}
 
 	hc := &http.Client{
 		Transport: tr,

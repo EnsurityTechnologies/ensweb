@@ -31,7 +31,7 @@ type Request struct {
 	Data        map[string]interface{} `json:"data" structs:"data" mapstructure:"data"`
 	Model       interface{}
 	Headers     http.Header
-	TenantID    uuid.UUID
+	TenantID    string
 	ss          string
 	sd          string
 	redID       string
@@ -169,9 +169,9 @@ func (req *Request) GetHTTPWritter() http.ResponseWriter {
 	return req.w
 }
 
-func (s *Server) getTenantID(r *http.Request) uuid.UUID {
+func (s *Server) getTenantID(r *http.Request) string {
 	if s.tcb == nil {
-		return s.defaultTenantID
+		return s.defaultTenantID.String()
 	}
 	url := r.Host
 	url = strings.TrimPrefix(url, "https://")

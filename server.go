@@ -59,7 +59,7 @@ const (
 type HandlerFunc func(req *Request) *Result
 type AuthFunc func(req *Request) bool
 type ShutdownFunc func() error
-type GetTenantCBFunc func(tenantName string) uuid.UUID
+type GetTenantCBFunc func(tenantName string) string
 
 // Server defines server
 type Server struct {

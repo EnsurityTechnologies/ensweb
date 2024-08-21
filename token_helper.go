@@ -2,7 +2,6 @@ package ensweb
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,10 +21,14 @@ type InternalTokenHelper struct {
 	refreshFileName  string
 }
 
-func NewInternalTokenHelper(accessFileName string, refreshFileName string) (*InternalTokenHelper, error) {
-	homeDir, err := homedir.Dir()
-	if err != nil {
-		panic(fmt.Sprintf("error getting user's home directory: %v", err))
+func NewInternalTokenHelper(dir string, accessFileName string, refreshFileName string) (*InternalTokenHelper, error) {
+	homeDir := dir
+	if homeDir == "" {
+		var err error
+		homeDir, err = homedir.Dir()
+		if err != nil {
+			return nil, err
+		}
 	}
 	ifh := &InternalTokenHelper{
 		homeDir:          homeDir,
