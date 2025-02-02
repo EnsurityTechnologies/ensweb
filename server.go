@@ -87,6 +87,7 @@ type Server struct {
 	tcb             GetTenantCBFunc
 	tlsCert         *certs.TLSCertificate
 	tlsConfig       *tls.Config
+	defaultHeaders  map[string]string
 }
 
 type ServerConfig struct {
@@ -245,6 +246,7 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 		tlsConfig: &tls.Config{
 			NextProtos: []string{"h2", "http/1.1"},
 		},
+		defaultHeaders: make(map[string]string),
 	}
 	if s.cfg.Secure {
 		s.url = "https://" + addr
@@ -254,9 +256,12 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 		if s.cfg.KeyFile == "" {
 			s.cfg.KeyFile = "server.key"
 		}
-		if strings.HasPrefix(s.cfg.CertFile, ".pfx") {
+		s.log.Info("loading Certificate : " + s.cfg.CertFile)
+		if strings.HasSuffix(s.cfg.CertFile, ".pfx") {
+			s.log.Info("Loading PFX certificate")
 			s.tlsCert = certs.NewTLSCertificateFromPFX(s.cfg.CertFile, s.cfg.KeyPwd)
 		} else {
+			s.log.Info("Loading PEM certificate")
 			s.tlsCert = certs.NewTLSCertificate(s.cfg.CertFile, s.cfg.KeyFile, s.cfg.KeyPwd)
 		}
 		err := s.tlsCert.Reload()
@@ -314,6 +319,12 @@ func (s *Server) SetAuditLog(log logger.Logger) {
 
 func (s *Server) SetAPIKey(apiKey string) {
 	s.apiKey = apiKey
+}
+
+func (s *Server) SetDefaultHeaders(headers map[string]string) {
+	for k, v := range headers {
+		s.defaultHeaders[k] = v
+	}
 }
 
 // Start starts the underlying HTTP server

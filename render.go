@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 func (s *Server) enableCors(w *http.ResponseWriter) {
@@ -19,11 +20,25 @@ func (s *Server) enableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Headers", s.allowHeaders)
 }
 
+func (s *Server) addDefaultHeaders(w *http.ResponseWriter) {
+	for k, v := range s.defaultHeaders {
+		(*w).Header().Set(k, v)
+	}
+}
+
+func (s *Server) SetHeaders(req *Request, headers map[string]string) {
+	if req.w != nil {
+		for k, v := range headers {
+			req.w.Header().Set(k, v)
+		}
+	}
+}
+
 func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result {
 	if s.debugMode {
 		s.enableCors(&req.w)
 	}
-
+	s.addDefaultHeaders(&req.w)
 	req.w.Header().Set("Content-Type", "application/json")
 
 	res := &Result{
@@ -64,6 +79,7 @@ func (s *Server) RenderNormalJSON(req *Request, model interface{}, status int) *
 	if s.debugMode {
 		s.enableCors(&req.w)
 	}
+	s.addDefaultHeaders(&req.w)
 	req.w.Header().Set("Content-Type", "application/json")
 	res := &Result{
 		Status: status,
@@ -80,14 +96,35 @@ func (s *Server) RenderNormalJSON(req *Request, model interface{}, status int) *
 	return res
 }
 
+func (s *Server) RenderJSONErrorResponse(req *Request, status int, errMsg string, log bool, args ...interface{}) *Result {
+	if log {
+		s.log.Error(errMsg, args...)
+	}
+	model := BaseResponse{
+		Message: strings.ToTitle(errMsg),
+	}
+	return s.RenderJSON(req, model, status)
+}
+
 func (s *Server) RenderJSONError(req *Request, status int, errMsg string, logMsg string, args ...interface{}) *Result {
 	if logMsg != "" {
 		s.log.Error(logMsg, args...)
 	}
 	model := BaseResponse{
-		Message: errMsg,
+		Message: strings.ToTitle(errMsg),
 	}
 	return s.RenderJSON(req, model, status)
+}
+
+func (s *Server) RenderJSONSuccessResponse(req *Request, msg string, log bool, args ...interface{}) *Result {
+	if log {
+		s.log.Info(msg, args...)
+	}
+	model := BaseResponse{
+		Status:  true,
+		Message: strings.ToTitle(msg),
+	}
+	return s.RenderJSON(req, model, http.StatusOK)
 }
 
 func (s *Server) RenderJSONStatus(req *Request, status string, message string, logMsg string, args ...interface{}) *Result {
@@ -103,18 +140,17 @@ func (s *Server) RenderJSONStatus(req *Request, status string, message string, l
 
 func (s *Server) RenderTemplate(req *Request, renderPath string, model interface{}, status int) *Result {
 	templateFile := s.rootDir + renderPath + ".html"
-	fmt.Printf("File : %s\n", templateFile)
+	s.log.Debug("Template filename : " + templateFile)
 	t, err := template.ParseFiles(templateFile)
 	if err != nil {
 		return s.RenderJSON(req, nil, http.StatusNotFound)
 	}
-	fmt.Printf("File : %s\n", templateFile)
+	s.addDefaultHeaders(&req.w)
 	err = t.Execute(req.w, model)
 	if err != nil {
 		fmt.Printf("Error : %s\n", err.Error())
 		return s.RenderJSON(req, nil, http.StatusInternalServerError)
 	}
-	fmt.Printf("File : %s\n", templateFile)
 	res := &Result{
 		Status: status,
 		Done:   true,
@@ -132,7 +168,7 @@ func (s *Server) RenderFile(req *Request, fileName string, attachment bool) *Res
 		Status: http.StatusOK,
 		Done:   true,
 	}
-
+	s.addDefaultHeaders(&req.w)
 	if attachment {
 		f, err := os.Open(fileName)
 		defer f.Close() //Close after function return
@@ -178,6 +214,7 @@ func (s *Server) RenderMultiFormFile(req *Request, field map[string]string, file
 	if s.debugMode {
 		s.enableCors(&req.w)
 	}
+	s.addDefaultHeaders(&req.w)
 
 	res := &Result{
 		Status: http.StatusOK,
@@ -230,6 +267,7 @@ func (s *Server) RenderImage(req *Request, contentType string, img string) *Resu
 	if s.debugMode {
 		s.enableCors(&req.w)
 	}
+	s.addDefaultHeaders(&req.w)
 	req.w.Header().Set("Content-Type", contentType)
 
 	res := &Result{
