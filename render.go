@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
 func (s *Server) enableCors(w *http.ResponseWriter) {
@@ -101,7 +100,7 @@ func (s *Server) RenderJSONErrorResponse(req *Request, status int, errMsg string
 		s.log.Error(errMsg, args...)
 	}
 	model := BaseResponse{
-		Message: strings.ToTitle(errMsg),
+		Message: ToTitleCase(errMsg),
 	}
 	return s.RenderJSON(req, model, status)
 }
@@ -111,7 +110,7 @@ func (s *Server) RenderJSONError(req *Request, status int, errMsg string, logMsg
 		s.log.Error(logMsg, args...)
 	}
 	model := BaseResponse{
-		Message: strings.ToTitle(errMsg),
+		Message: ToTitleCase(errMsg),
 	}
 	return s.RenderJSON(req, model, status)
 }
@@ -122,7 +121,7 @@ func (s *Server) RenderJSONSuccessResponse(req *Request, msg string, log bool, a
 	}
 	model := BaseResponse{
 		Status:  true,
-		Message: strings.ToTitle(msg),
+		Message: ToTitleCase(msg),
 	}
 	return s.RenderJSON(req, model, http.StatusOK)
 }
