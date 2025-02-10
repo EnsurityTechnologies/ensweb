@@ -200,7 +200,7 @@ func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 		req := basicRequestFunc(s, w, r)
 		var res *Result
 		errAuth := false
-		if s.secureAPI && req.Path != GetPublicKeyAPI {
+		if s.secureAPI && !s.isUnProtectedPath(req.Path) {
 			licenkey := s.GetReqHeader(req, LicenseKeyHdr)
 			if licenkey != s.licenseKey {
 				errAuth = true
@@ -257,7 +257,7 @@ func indexRoute(s *Server, dirPath string) http.Handler {
 		if s.debugMode {
 			s.enableCors(&w)
 		}
-
+		s.addDefaultHeaders(&w)
 		fs.ServeHTTP(w, r)
 	})
 }
@@ -277,6 +277,11 @@ func (s *Server) IsFORM(req *Request) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func (s *Server) ParseNormalJSON(req *Request, model interface{}) error {
+	_, err := parseJSONRequest(false, req.r, req.w, model)
+	return err
 }
 
 func (s *Server) ParseJSON(req *Request, model interface{}) error {

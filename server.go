@@ -63,31 +63,32 @@ type GetTenantCBFunc func(tenantName string) string
 
 // Server defines server
 type Server struct {
-	cfg             *Config
-	serverCfg       *ServerConfig
-	s               *http.Server
-	mux             *mux.Router
-	log             logger.Logger
-	auditLog        logger.Logger
-	db              *gorm.DB
-	url             string
-	jwtSecret       string
-	rootDir         string
-	prefixPath      string
-	apiKey          string
-	secureAPI       bool
-	pk              *ecdh.PrivateKey
-	publicKey       string
-	licenseKey      string
-	ss              map[string]*SessionStore
-	debugMode       bool
-	allowHeaders    string
-	sf              ShutdownFunc
-	defaultTenantID uuid.UUID
-	tcb             GetTenantCBFunc
-	tlsCert         *certs.TLSCertificate
-	tlsConfig       *tls.Config
-	defaultHeaders  map[string]string
+	cfg              *Config
+	serverCfg        *ServerConfig
+	s                *http.Server
+	mux              *mux.Router
+	log              logger.Logger
+	auditLog         logger.Logger
+	db               *gorm.DB
+	url              string
+	jwtSecret        string
+	rootDir          string
+	prefixPath       string
+	apiKey           string
+	secureAPI        bool
+	pk               *ecdh.PrivateKey
+	publicKey        string
+	licenseKey       string
+	ss               map[string]*SessionStore
+	debugMode        bool
+	allowHeaders     string
+	sf               ShutdownFunc
+	defaultTenantID  uuid.UUID
+	tcb              GetTenantCBFunc
+	tlsCert          *certs.TLSCertificate
+	tlsConfig        *tls.Config
+	defaultHeaders   map[string]string
+	unProtectedPaths []string
 }
 
 type ServerConfig struct {
@@ -282,6 +283,8 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 	}
 	if s.secureAPI {
 		s.AddRoute(GetPublicKeyAPI, "GET", s.getPublicKeyAPI)
+		s.unProtectedPaths = make([]string, 0)
+		s.unProtectedPaths = append(s.unProtectedPaths, GetPublicKeyAPI)
 	}
 
 	return s, nil
@@ -324,6 +327,31 @@ func (s *Server) SetAPIKey(apiKey string) {
 func (s *Server) SetDefaultHeaders(headers map[string]string) {
 	for k, v := range headers {
 		s.defaultHeaders[k] = v
+	}
+}
+
+func (s *Server) isUnProtectedPath(path string) bool {
+	if s.secureAPI {
+		if s.unProtectedPaths == nil {
+			return false
+		}
+		for _, p := range s.unProtectedPaths {
+			if p == path {
+				return true
+			}
+		}
+		return false
+	} else {
+		return true
+	}
+}
+
+func (s *Server) AddUnProtectedPath(path string) {
+	if s.secureAPI {
+		if s.unProtectedPaths == nil {
+			s.unProtectedPaths = make([]string, 0)
+		}
+		s.unProtectedPaths = append(s.unProtectedPaths, path)
 	}
 }
 
