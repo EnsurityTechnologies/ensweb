@@ -57,7 +57,7 @@ func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result
 				res.Status = http.StatusInternalServerError
 				return res
 			}
-			data, err := encryptModel(req.ss, model)
+			data, err := encryptModel(req.nss, req.ss, model)
 			if err != nil {
 				s.log.Error("failed to encrypt output model", "err", err)
 			}

@@ -209,7 +209,7 @@ func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 			}
 			if !errAuth {
 				var rid RequestID
-				err := decryptModel(req.ss, req.redID, &rid)
+				err := decryptModel(req.nss, req.ss, req.redID, &rid)
 				if err != nil {
 					errAuth = true
 					res = s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID", "err", err)
@@ -238,7 +238,6 @@ func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 func indexRoute(s *Server, dirPath string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fs := http.FileServer(http.Dir(dirPath))
-
 		// If the requested file exists then return if; otherwise return index.html (fileserver default page)
 		if r.URL.Path != "/" {
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, s.prefixPath)
@@ -293,7 +292,7 @@ func (s *Server) ParseJSON(req *Request, model interface{}) error {
 			return err
 		}
 		req.sd = sd.Data
-		return decryptModel(req.ss, sd.Data, model)
+		return decryptModel(req.nss, req.ss, sd.Data, model)
 	} else {
 		_, err = parseJSONRequest(false, req.r, req.w, model)
 	}

@@ -8,6 +8,7 @@ require (
 	github.com/EnsurityTechnologies/helper v1.0.0
 	github.com/EnsurityTechnologies/logger v1.0.4
 	github.com/EnsurityTechnologies/uuid v1.0.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/frankban/quicktest v1.14.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.0

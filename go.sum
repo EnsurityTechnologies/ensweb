@@ -11,6 +11,9 @@ github.com/EnsurityTechnologies/uuid v1.0.0/go.mod h1:/TCyZtiWFJ6Ip1LYnq0M3OpwYQ
 github.com/EnsurityTechnologies/wraperr v1.0.0 h1:r4w3jNvvSND5LfOrJNzaakSI6Il4aqrsjWJ32geNcrA=
 github.com/EnsurityTechnologies/wraperr v1.0.0/go.mod h1:TlhuQGM9O4FdXy41xXGKX/lr6+T1kcq8H13ArFZT16w=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
+github.com/decred/dcrd/crypto/blake256 v1.1.0/go.mod h1:2OfgNZ5wDpcsFmHmCK5gZTPcCXqlm2ArzUIkw9czNJo=
+github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 h1:NMZiJj8QnKe1LgsbDayM4UoHwbvwDRwnI3hwNaAHRnc=
+github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0/go.mod h1:ZXNYxsqcloTdSy/rNShjYzMhyjf0LaoftYK0p+A3h40=
 github.com/fatih/color v1.12.0/go.mod h1:ELkj/draVOlAH/xkhN6mQ50Qd0MPOk5AAr3maGEBuJM=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=

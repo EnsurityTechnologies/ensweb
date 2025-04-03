@@ -9,11 +9,13 @@ import (
 // }
 
 func (s *Server) AddRoute(path string, method string, hf HandlerFunc) {
+	path = s.subDirectory + path
 	s.mux.Handle(path, basicHandleFunc(s, hf)).Methods(method)
 	s.mux.Handle(path, basicPreflightHandleFunc(s)).Methods("OPTIONS")
 }
 
 func (s *Server) AddPrefixRoute(prefix string, hf HandlerFunc) {
+	prefix = s.subDirectory + prefix
 	s.mux.PathPrefix(prefix).Handler(basicHandleFunc(s, hf))
 }
 
@@ -37,8 +39,8 @@ func (s *Server) GetMux() *mux.Router {
 
 func (s *Server) SetStatic(prefix string, dir string) {
 	s.rootDir = dir
-	s.prefixPath = prefix
-	s.mux.PathPrefix("/").Handler(indexRoute(s, dir))
+	s.prefixPath = s.subDirectory + prefix
+	s.mux.PathPrefix(s.prefixPath).Handler(indexRoute(s, dir))
 }
 
 func (s *Server) GetRouteVar(req *Request, key string) string {

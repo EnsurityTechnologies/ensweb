@@ -33,6 +33,7 @@ type Request struct {
 	Headers     http.Header
 	TenantID    string
 	ss          string
+	nss         []byte
 	sd          string
 	redID       string
 	r           *http.Request

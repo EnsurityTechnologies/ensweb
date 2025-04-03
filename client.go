@@ -26,6 +26,7 @@ import (
 	"github.com/EnsurityTechnologies/helper/jsonutil"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 type AuthenticateFunc func() error
@@ -44,11 +45,14 @@ type Client struct {
 	cookies         []*http.Cookie
 	secureAPI       bool
 	pk              *ecdh.PrivateKey
+	npk             *secp256k1.PrivateKey
 	publicKey       string
 	licenseKey      string
 	serverPublicKey string
 	ss              string
+	nss             []byte
 	jid             string
+	subDirectory    string
 }
 
 type ClientOptions = func(*Client) error
@@ -67,41 +71,74 @@ func SetClientTokenHelper(th TokenHelper) ClientOptions {
 	}
 }
 
-func EnableClientSecureAPI(licenseKey string) ClientOptions {
+func EnableClientSecureAPI(licenseKey string, enableV2 bool) ClientOptions {
 	return func(c *Client) error {
 		c.secureAPI = true
 		c.licenseKey = licenseKey
-		key, err := ecdh.P256().GenerateKey(rand.Reader)
-		if err != nil {
-			c.log.Error("failed to generate private key", "err", err)
-			return err
+		if enableV2 {
+			nkey, err := secp256k1.GeneratePrivateKey()
+			if err != nil {
+				c.log.Error("failed to generate secp256k1 private key")
+				return err
+			}
+			c.npk = nkey
+			npub := c.npk.PubKey().SerializeUncompressed()
+			c.publicKey = base64.StdEncoding.EncodeToString(npub[1:])
+			req, err := c.JSONRequest("GET", c.subDirectory+GetPublicKeyAPIV2, nil)
+			if err != nil {
+				c.log.Error("failed to create json request", "err", err)
+				return err
+			}
+			resp, err := c.Do(req)
+			if err != nil {
+				c.log.Error("failed to get server public key, failed to get response", "err", err)
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNoContent {
+				c.log.Error("failed to get server public key, no response from server")
+				return fmt.Errorf("failed to get server public key, no response from server")
+			}
+			var pr PublicKeyResponse
+			err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
+			if err != nil {
+				c.log.Error("failed to get server public key, json unmarshell failed", "err", err)
+				return err
+			}
+			c.serverPublicKey = pr.PublicKey
+		} else {
+			key, err := ecdh.P256().GenerateKey(rand.Reader)
+			if err != nil {
+				c.log.Error("failed to generate private key", "err", err)
+				return err
+			}
+			c.pk = key
+			pub := c.pk.PublicKey().Bytes()
+			c.publicKey = base64.StdEncoding.EncodeToString(pub)
+			req, err := c.JSONRequest("GET", c.subDirectory+GetPublicKeyAPI, nil)
+			if err != nil {
+				c.log.Error("failed to create json request", "err", err)
+				return err
+			}
+			resp, err := c.Do(req)
+			if err != nil {
+				c.log.Error("failed to get server public key, failed to get response", "err", err)
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNoContent {
+				c.log.Error("failed to get server public key, no response from server")
+				return fmt.Errorf("failed to get server public key, no response from server")
+			}
+			var pr PublicKeyResponse
+			err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
+			if err != nil {
+				c.log.Error("failed to get server public key, json unmarshell failed", "err", err)
+				return err
+			}
+			c.serverPublicKey = pr.PublicKey
 		}
-		c.pk = key
-		pub := c.pk.PublicKey().Bytes()
-		c.publicKey = base64.StdEncoding.EncodeToString(pub)
-		req, err := c.JSONRequest("GET", GetPublicKeyAPI, nil)
-		if err != nil {
-			c.log.Error("failed to create json request", "err", err)
-			return err
-		}
-		resp, err := c.Do(req)
-		if err != nil {
-			c.log.Error("failed to get server public key, failed to get response", "err", err)
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNoContent {
-			c.log.Error("failed to get server public key, no response from server")
-			return fmt.Errorf("failed to get server public key, no response from server")
-		}
-		var pr PublicKeyResponse
-		err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
-		if err != nil {
-			c.log.Error("failed to get server public key, json unmarshell failed", "err", err)
-			return err
-		}
-		c.serverPublicKey = pr.PublicKey
-		err = c.getSharedSecret()
+		err := c.getSharedSecret()
 		if err != nil {
 			c.log.Error("failed to generate shared secret", "err", err)
 			return err
@@ -148,12 +185,13 @@ func NewClient(cfg *Config, log logger.Logger, options ...ClientOptions) (Client
 	}
 
 	c := Client{
-		cfg:     cfg,
-		log:     clog,
-		address: address,
-		addr:    addr,
-		hc:      hc,
-		jid:     uuid.New().String(),
+		cfg:          cfg,
+		log:          clog,
+		address:      address,
+		addr:         addr,
+		hc:           hc,
+		jid:          uuid.New().String(),
+		subDirectory: cfg.SubDirectory,
 	}
 
 	for _, op := range options {
@@ -370,6 +408,9 @@ func (c *Client) ParseMutilform(resp *http.Response, dirPath string) ([]string, 
 }
 
 func (c *Client) getSharedSecret() error {
+	if c.nss != nil {
+		return nil
+	}
 	if c.ss != "" {
 		return nil
 	}
@@ -378,6 +419,16 @@ func (c *Client) getSharedSecret() error {
 		c.log.Error("invalid pubkey, failed to decode base 64 string", "err", err)
 		return err
 	}
+
+	tot := make([]byte, len(pb)+1)
+	tot[0] = 0x04
+	copy(tot[1:], pb)
+	pk, err := secp256k1.ParsePubKey(tot)
+	if err == nil {
+		c.nss = secp256k1.GenerateSharedSecret(c.npk, pk)
+		return nil
+	}
+
 	pub, err := ecdh.P256().NewPublicKey(pb)
 	if err != nil {
 		c.log.Error("invalid pubkey, failed to frame pubkey", "err", err)
@@ -399,7 +450,7 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 	if c.secureAPI {
 		var sd SecureData
 		if in != nil {
-			sd.Data, err = encryptModel(c.ss, in)
+			sd.Data, err = encryptModel(c.nss, c.ss, in)
 			if err != nil {
 				c.log.Error("failed to encrypt input model", "err", err)
 				return 0, err
@@ -419,7 +470,7 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 			AppID:     "goclient",
 		}
 
-		rid, err := encryptModel(c.ss, reqID)
+		rid, err := encryptModel(c.nss, c.ss, reqID)
 		if err != nil {
 			c.log.Error("failed to encrypt request model", "err", err)
 			return 0, err
@@ -465,7 +516,7 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 				c.log.Error("failed to parse json output", "err", err)
 				return resp.StatusCode, err
 			}
-			err = decryptModel(c.ss, sd.Data, out)
+			err = decryptModel(c.nss, c.ss, sd.Data, out)
 			if err != nil {
 				c.log.Error("failed to decrypt model", "err", err)
 				return resp.StatusCode, err
@@ -489,6 +540,7 @@ func (c *Client) sendJSON(method string, path string, auth bool, querry map[stri
 }
 
 func (c *Client) SendJSON(method string, path string, auth bool, querry map[string]string, headers map[string]string, in interface{}, out interface{}, errout interface{}, af AuthenticateFunc, timeout ...time.Duration) error {
+	path = c.subDirectory + path
 	statusCode, err := c.sendJSON(method, path, auth, querry, headers, in, out, errout, timeout...)
 	if statusCode == http.StatusUnauthorized {
 		c.log.Debug("unauthorized calling authenticate function")

@@ -4,12 +4,9 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,9 +15,9 @@ import (
 	"time"
 
 	"github.com/EnsurityTechnologies/certs"
-	"github.com/EnsurityTechnologies/enscrypt"
 	"github.com/EnsurityTechnologies/logger"
 	"github.com/EnsurityTechnologies/uuid"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gorilla/mux"
 	"github.com/jefferai/isbadcipher"
 	"gorm.io/gorm"
@@ -41,7 +38,8 @@ const (
 	LicenseKeyHdr    string = "licensekey"
 )
 const (
-	GetPublicKeyAPI string = "/api/getpublickey"
+	GetPublicKeyAPI   string = "/api/getpublickey"
+	GetPublicKeyAPIV2 string = "/api/v2/getpublickey"
 )
 
 const (
@@ -77,7 +75,9 @@ type Server struct {
 	apiKey           string
 	secureAPI        bool
 	pk               *ecdh.PrivateKey
+	npk              *secp256k1.PrivateKey
 	publicKey        string
+	newPublicKey     string
 	licenseKey       string
 	ss               map[string]*SessionStore
 	debugMode        bool
@@ -89,6 +89,7 @@ type Server struct {
 	tlsConfig        *tls.Config
 	defaultHeaders   map[string]string
 	unProtectedPaths []string
+	subDirectory     string
 }
 
 type ServerConfig struct {
@@ -128,10 +129,20 @@ func SetDB(db *gorm.DB) ServerOptions {
 	}
 }
 
-func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
+func EnableSecureAPI(pk *ecdh.PrivateKey, npk *secp256k1.PrivateKey, licenseKey string) ServerOptions {
 	return func(s *Server) error {
 		s.secureAPI = true
 		s.licenseKey = licenseKey
+		if npk == nil {
+			key, err := secp256k1.GeneratePrivateKey()
+			if err != nil {
+				s.log.Error("failed to generate secp256k1 private key")
+				return err
+			}
+			s.npk = key
+		} else {
+			s.npk = npk
+		}
 		if pk == nil {
 			key, err := ecdh.P256().GenerateKey(rand.Reader)
 			if err != nil {
@@ -142,6 +153,9 @@ func EnableSecureAPI(pk *ecdh.PrivateKey, licenseKey string) ServerOptions {
 		} else {
 			s.pk = pk
 		}
+		npub := s.npk.PubKey().SerializeUncompressed()
+		s.newPublicKey = base64.StdEncoding.EncodeToString(npub[1:])
+		s.log.Info("Server New Public Key : " + s.newPublicKey)
 		pub := s.pk.PublicKey().Bytes()
 		s.publicKey = base64.StdEncoding.EncodeToString(pub)
 		s.log.Info("Server Public Key : " + s.publicKey)
@@ -153,6 +167,17 @@ func EnableDebug(allowHeaders string) ServerOptions {
 	return func(s *Server) error {
 		s.debugMode = true
 		s.allowHeaders = allowHeaders
+		return nil
+	}
+}
+
+func SetupSubDirectory(dir string) ServerOptions {
+	return func(s *Server) error {
+		if !strings.HasPrefix(dir, "/") {
+			dir = "/" + dir
+		}
+		dir = strings.TrimSuffix(dir, "/")
+		s.subDirectory = dir
 		return nil
 	}
 }
@@ -248,6 +273,7 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 			NextProtos: []string{"h2", "http/1.1"},
 		},
 		defaultHeaders: make(map[string]string),
+		subDirectory:   "",
 	}
 	if s.cfg.Secure {
 		s.url = "https://" + addr
@@ -283,8 +309,10 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 	}
 	if s.secureAPI {
 		s.AddRoute(GetPublicKeyAPI, "GET", s.getPublicKeyAPI)
+		s.AddRoute(GetPublicKeyAPIV2, "GET", s.getPublicKeyAPIV2)
 		s.unProtectedPaths = make([]string, 0)
-		s.unProtectedPaths = append(s.unProtectedPaths, GetPublicKeyAPI)
+		s.unProtectedPaths = append(s.unProtectedPaths, s.subDirectory+GetPublicKeyAPI)
+		s.unProtectedPaths = append(s.unProtectedPaths, s.subDirectory+GetPublicKeyAPIV2)
 	}
 
 	return s, nil
@@ -304,6 +332,24 @@ func (s *Server) getPublicKeyAPI(req *Request) *Result {
 			Status: true,
 		},
 		PublicKey: s.publicKey,
+	}
+	return s.RenderNormalJSON(req, pr, http.StatusOK)
+}
+
+// ShowAccount godoc
+// @Summary      Get the public key of the server
+// @Description  Get the public key of the server
+// @Tags         general
+// @Accept       json
+// @Produce      json
+// @Success      200 {object}  PublicKeyResponse
+// @Router       /api/v2/getpublickey [get]
+func (s *Server) getPublicKeyAPIV2(req *Request) *Result {
+	pr := PublicKeyResponse{
+		BaseResponse: BaseResponse{
+			Status: true,
+		},
+		PublicKey: s.newPublicKey,
 	}
 	return s.RenderNormalJSON(req, pr, http.StatusOK)
 }
@@ -351,6 +397,7 @@ func (s *Server) AddUnProtectedPath(path string) {
 		if s.unProtectedPaths == nil {
 			s.unProtectedPaths = make([]string, 0)
 		}
+		path = s.subDirectory + path
 		s.unProtectedPaths = append(s.unProtectedPaths, path)
 	}
 }
@@ -427,57 +474,4 @@ func (s *Server) GetDB() *gorm.DB {
 // GetDB will return DB
 func (s *Server) GetServerURL() string {
 	return s.url
-}
-
-func (s *Server) getSharedSecret(req *Request) error {
-	if req.ss != "" {
-		return nil
-	}
-	pubkey := s.GetReqHeader(req, PublicKeyHdr)
-	pb, err := base64.StdEncoding.DecodeString(pubkey)
-	if err != nil {
-		s.log.Error("invalid pubkey, failed to decode base 64 string", "err", err)
-		return err
-	}
-	pub, err := ecdh.P256().NewPublicKey(pb)
-	if err != nil {
-		s.log.Error("invalid pubkey, failed to frame pubkey", "err", err)
-		return err
-	}
-	kb, err := s.pk.ECDH(pub)
-	if err != nil {
-		s.log.Error("failed to create shared secret", "err", err)
-		return err
-	}
-	ss := sha256.Sum256(kb)
-	req.ss = hex.EncodeToString(ss[:])
-	return nil
-}
-
-func encryptModel(ss string, model interface{}) (string, error) {
-	data, err := json.Marshal(model)
-	if err != nil {
-		return "", err
-	}
-	eb, err := enscrypt.Seal(ss, data)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(eb), nil
-}
-
-func decryptModel(ss string, data string, model interface{}) error {
-	eb, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		return err
-	}
-	db, err := enscrypt.UnSeal(ss, eb)
-	if err != nil {
-		return err
-	}
-	err = json.Unmarshal(db, model)
-	if err != nil {
-		return err
-	}
-	return nil
 }
