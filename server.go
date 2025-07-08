@@ -90,6 +90,8 @@ type Server struct {
 	defaultHeaders   map[string]string
 	unProtectedPaths []string
 	subDirectory     string
+	rbac             RBACInterface
+	rolePermisions   map[string]map[string][]string
 }
 
 type ServerConfig struct {
@@ -125,6 +127,14 @@ func SetServerTimeout(timeout time.Duration) ServerOptions {
 func SetDB(db *gorm.DB) ServerOptions {
 	return func(s *Server) error {
 		s.db = db
+		return nil
+	}
+}
+
+func EnableRBAC(db *gorm.DB, rbac RBACInterface) ServerOptions {
+	return func(s *Server) error {
+		s.db = db
+		s.rbac = rbac
 		return nil
 	}
 }
