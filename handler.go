@@ -285,7 +285,7 @@ func (s *Server) ParseNormalJSON(req *Request, model interface{}) error {
 
 func (s *Server) ParseJSON(req *Request, model interface{}) error {
 	var err error
-	if s.secureAPI {
+	if s.secureAPI && !s.isUnProtectedPath(req.Path) {
 		var sd SecureData
 		_, err = parseJSONRequest(false, req.r, req.w, &sd)
 		if err != nil {

@@ -66,12 +66,16 @@ func (s *Server) InitTenantRBAC(defaultConfig []byte, tenantID string) error {
 					}
 				}
 				if !found {
-					// Permission does not exist, create it
-					newPerm = append(newPerm, Permission{
-						ID:       uuid.New().String(),
-						TenantID: tenantID,
-						Key:      permKey,
-					})
+					p, err := s.rbac.GetPermissions(permKey, tenantID)
+					if err != nil || p == nil {
+						// Permission does not exist, create it
+						p = &Permission{
+							ID:       uuid.New().String(),
+							TenantID: tenantID,
+							Key:      permKey,
+						}
+					}
+					newPerm = append(newPerm, *p)
 				}
 			}
 			if len(newPerm) > 0 {

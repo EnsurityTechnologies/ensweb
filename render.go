@@ -50,7 +50,7 @@ func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result
 		req.w.WriteHeader(http.StatusNoContent)
 	} else {
 		enc := json.NewEncoder(req.w)
-		if s.secureAPI {
+		if s.secureAPI && !s.isUnProtectedPath(req.Path) {
 			err := s.getSharedSecret(req)
 			if err != nil {
 				req.w.WriteHeader(http.StatusInternalServerError)
