@@ -15,7 +15,53 @@ import (
 	"time"
 
 	"github.com/EnsurityTechnologies/helper/jsonutil"
+	"github.com/EnsurityTechnologies/uuid"
 )
+
+// validateSecureAPI validates secure API requirements and returns error result if validation fails
+func (s *Server) validateSecureAPI(req *Request) *Result {
+	// Validate license key
+	licenkey := s.GetReqHeader(req, LicenseKeyHdr)
+	if licenkey != s.licenseKey {
+		s.log.Error("invalid license", "exp", s.licenseKey, "recv", licenkey)
+		return s.RenderJSONError(req, http.StatusUnauthorized, "invalid license key", "invalid license key")
+	}
+
+	// Validate and decrypt request ID
+	var rid RequestID
+	err := decryptModel(req.nss, req.ss, req.redID, &rid)
+	if err != nil {
+		return s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID", "err", err)
+	}
+
+	// TODO: validate request time
+	return nil
+}
+
+// auditRequest logs the request for audit purposes
+func (s *Server) auditRequest(req *Request, res *Result, r *http.Request) {
+	if s.auditLog == nil || res == nil {
+		return
+	}
+
+	timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
+	userAgent := r.Header.Get("User-Agent")
+
+	if res.Done {
+		s.auditLog.Info("HTTP request processed",
+			"Path", req.Path,
+			"IP Address", req.Connection.RemoteAddr,
+			"Status", res.Status,
+			"Duration", timeDuration,
+			"User-Agent", userAgent)
+	} else {
+		s.auditLog.Error("HTTP request failed",
+			"Path", req.Path,
+			"IP Address", req.Connection.RemoteAddr,
+			"Duration", timeDuration,
+			"User-Agent", userAgent)
+	}
+}
 
 // bufferedReader can be used to replace a request body with a buffered
 // version. The Close method invokes the original Closer.
@@ -166,72 +212,65 @@ func parseFormRequest(r *http.Request) (map[string]interface{}, error) {
 
 func basicPreflightHandleFunc(s *Server) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, err := basicRequestFunc(s, w, r)
 
-		req := basicRequestFunc(s, w, r)
+		// Handle tenant resolution error for preflight requests
+		if err != nil {
+			// For preflight requests, we can still allow CORS but log the error
+			s.log.Error("tenant resolution error in preflight request", "err", err, "host", r.Host)
+			if s.debugMode {
+				s.enableCors(&w)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 
 		if s.debugMode {
 			s.enableCors(&req.w)
 		}
 
 		req.w.Header().Set("Content-Type", "application/json")
+		req.w.WriteHeader(http.StatusOK)
 
+		// Create result for audit logging
 		res := &Result{
 			Status: http.StatusOK,
 			Done:   true,
 		}
-		req.w.WriteHeader(http.StatusOK)
-
-		if res != nil && s.auditLog != nil {
-			timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
-			userAgent := r.Header.Get("User-Agent")
-			if res.Done {
-				s.auditLog.Info("HTTP request processed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Status", res.Status, "Duration", timeDuration, "User-Agent", userAgent)
-			} else {
-				s.auditLog.Error("HTTP request failed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Duration", timeDuration, "User-Agent", userAgent)
-			}
-		}
-
+		s.auditRequest(req, res, r)
 	})
 }
 
 func basicHandleFunc(s *Server, hf HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, err := basicRequestFunc(s, w, r)
+		// Handle tenant resolution error with direct response
+		if err != nil {
+			// Create a minimal request for error response using existing RenderJSONErrorResponse
+			errorReq := &Request{
+				ID:     uuid.New().String(),
+				Method: r.Method,
+				Path:   r.URL.Path,
+				TimeIn: time.Now(),
+				r:      r,
+				w:      w,
+			}
+			res := s.RenderJSONError(errorReq, http.StatusBadRequest, "Invalid tenant", "tenant resolution failed", "err", err, "host", r.Host)
+			s.auditRequest(errorReq, res, r)
+			return
+		}
 
-		req := basicRequestFunc(s, w, r)
-		var res *Result
-		errAuth := false
+		// Handle secure API validation with early returns
 		if s.secureAPI && !s.isUnProtectedPath(req.Path) {
-			licenkey := s.GetReqHeader(req, LicenseKeyHdr)
-			if licenkey != s.licenseKey {
-				errAuth = true
-				s.log.Error("invaid license", "exp", s.licenseKey, "recv", licenkey)
-				res = s.RenderJSONError(req, http.StatusUnauthorized, "invalid license key", "invalid license key")
-			}
-			if !errAuth {
-				var rid RequestID
-				err := decryptModel(req.nss, req.ss, req.redID, &rid)
-				if err != nil {
-					errAuth = true
-					res = s.RenderJSONError(req, http.StatusUnauthorized, "failed to decrypt the request ID", "failed to decrypt the request ID", "err", err)
-				}
-				// ::TODO:: validate request time
+			if res := s.validateSecureAPI(req); res != nil {
+				s.auditRequest(req, res, r)
+				return
 			}
 		}
 
-		if !errAuth {
-			res = hf(req)
-		}
-
-		if res != nil && s.auditLog != nil {
-			timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
-			userAgent := r.Header.Get("User-Agent")
-			if res.Done {
-				s.auditLog.Info("HTTP request processed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Status", res.Status, "Duration", timeDuration, "User-Agent", userAgent)
-			} else {
-				s.auditLog.Error("HTTP request failed", "Path", req.Path, "IP Address", req.Connection.RemoteAddr, "Duration", timeDuration, "User-Agent", userAgent)
-			}
-		}
-
+		// Execute the handler function
+		res := hf(req)
+		s.auditRequest(req, res, r)
 	})
 }
 

@@ -58,6 +58,7 @@ type HandlerFunc func(req *Request) *Result
 type AuthFunc func(req *Request) bool
 type ShutdownFunc func() error
 type GetTenantCBFunc func(tenantName string) string
+type GetTenantCBFuncWithError func(tenantName string) (string, error)
 
 // Server defines server
 type Server struct {
@@ -85,6 +86,7 @@ type Server struct {
 	sf               ShutdownFunc
 	defaultTenantID  uuid.UUID
 	tcb              GetTenantCBFunc
+	tcbWithError     GetTenantCBFuncWithError
 	tlsCert          *certs.TLSCertificate
 	tlsConfig        *tls.Config
 	defaultHeaders   map[string]string
@@ -107,6 +109,15 @@ type ErrMessage struct {
 type StatusMsg struct {
 	Status  string `json:"Status"`
 	Message string `json:"Message"`
+}
+
+// TenantError represents an error in tenant resolution
+type TenantError struct {
+	Message string
+}
+
+func (e *TenantError) Error() string {
+	return e.Message
 }
 
 type SecureData struct {
@@ -474,6 +485,10 @@ func (s *Server) SetDefaultTenant(id uuid.UUID) {
 
 func (s *Server) SetTenantCBFunc(tcb GetTenantCBFunc) {
 	s.tcb = tcb
+}
+
+func (s *Server) SetTenantCBFuncWithError(tcb GetTenantCBFuncWithError) {
+	s.tcbWithError = tcb
 }
 
 // GetDB will return DB
