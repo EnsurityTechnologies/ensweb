@@ -57,7 +57,7 @@ const (
 type HandlerFunc func(req *Request) *Result
 type AuthFunc func(req *Request) bool
 type ShutdownFunc func() error
-type GetTenantCBFunc func(tenantName string) string
+type GetTenantCBFunc func(tenantName string) (string, error)
 
 // Server defines server
 type Server struct {
@@ -107,6 +107,15 @@ type ErrMessage struct {
 type StatusMsg struct {
 	Status  string `json:"Status"`
 	Message string `json:"Message"`
+}
+
+// TenantError represents an error in tenant resolution
+type TenantError struct {
+	Message string
+}
+
+func (e *TenantError) Error() string {
+	return e.Message
 }
 
 type SecureData struct {

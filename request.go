@@ -171,19 +171,33 @@ func (req *Request) GetHTTPWritter() http.ResponseWriter {
 }
 
 func (s *Server) getTenantID(r *http.Request) string {
-	if s.tcb == nil {
-		return s.defaultTenantID.String()
-	}
-	url := r.Host
-	url = strings.TrimPrefix(url, "https://")
-	return s.tcb(url)
+	tenantID, _ := s.getTenantIDWithError(r)
+	return tenantID
 }
 
-func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) *Request {
+func (s *Server) getTenantIDWithError(r *http.Request) (string, error) {
+	// Priority: tcb > defaultTenantID
+	if s.tcb != nil {
+		url := r.Host
+		url = strings.TrimPrefix(url, "https://")
+		return s.tcb(url)
+	}
+	return s.defaultTenantID.String(), nil
+}
+
+func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) (*Request, error) {
 
 	path := r.URL.Path
 
 	requestId := uuid.New().String()
+
+	// Get tenant ID with error handling
+	tenantID, err := s.getTenantIDWithError(r)
+	if err != nil {
+		// Log the error and return it to be handled by the caller
+		s.log.Error("failed to get tenant ID from callback", "err", err, "host", r.Host)
+		return nil, err
+	}
 
 	req := &Request{
 		ID:          requestId,
@@ -193,7 +207,7 @@ func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) *Reques
 		ClientToken: getTokenFromReq(s, r),
 		Connection:  getConnection(r),
 		Headers:     r.Header,
-		TenantID:    s.getTenantID(r),
+		TenantID:    tenantID,
 		r:           r,
 		w:           w,
 	}
@@ -208,7 +222,7 @@ func basicRequestFunc(s *Server, w http.ResponseWriter, r *http.Request) *Reques
 		}
 	}
 
-	return req
+	return req, nil
 
 }
 
