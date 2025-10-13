@@ -176,19 +176,12 @@ func (s *Server) getTenantID(r *http.Request) string {
 }
 
 func (s *Server) getTenantIDWithError(r *http.Request) (string, error) {
-	// Priority: tcbWithError > tcb > defaultTenantID
-	if s.tcbWithError != nil {
-		url := r.Host
-		url = strings.TrimPrefix(url, "https://")
-		return s.tcbWithError(url)
-	}
-
+	// Priority: tcb > defaultTenantID
 	if s.tcb != nil {
 		url := r.Host
 		url = strings.TrimPrefix(url, "https://")
-		return s.tcb(url), nil
+		return s.tcb(url)
 	}
-
 	return s.defaultTenantID.String(), nil
 }
 

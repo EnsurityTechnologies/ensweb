@@ -48,10 +48,10 @@ func TestTenantCallbackBackwardCompatibility(t *testing.T) {
 	}
 
 	// Test 1: Backward compatibility with old callback
-	oldCallback := func(tenantName string) string {
-		return "tenant-" + tenantName
+	newCallback := func(tenantName string) (string, error) {
+		return "new-" + tenantName, nil
 	}
-	server.SetTenantCBFunc(oldCallback)
+	server.SetTenantCBFunc(newCallback)
 
 	// Create a test request
 	req := httptest.NewRequest("GET", "http://example.com/test", nil)
@@ -100,7 +100,7 @@ func TestTenantCallbackWithError(t *testing.T) {
 		}
 		return "tenant-" + tenantName, nil
 	}
-	server.SetTenantCBFuncWithError(errorCallback)
+	server.SetTenantCBFunc(errorCallback)
 
 	// Test successful case
 	req := httptest.NewRequest("GET", "http://valid.com/test", nil)
@@ -149,15 +149,15 @@ func TestTenantCallbackPriority(t *testing.T) {
 	server.SetDefaultTenant(defaultTenantID)
 
 	// Set both old and new callbacks
-	oldCallback := func(tenantName string) string {
-		return "old-" + tenantName
-	}
+	// oldCallback := func(tenantName string) string {
+	// 	return "old-" + tenantName
+	// }
 	newCallback := func(tenantName string) (string, error) {
 		return "new-" + tenantName, nil
 	}
 
-	server.SetTenantCBFunc(oldCallback)
-	server.SetTenantCBFuncWithError(newCallback)
+	//server.SetTenantCBFunc(oldCallback)
+	server.SetTenantCBFunc(newCallback)
 
 	// Test that new callback takes priority
 	req := httptest.NewRequest("GET", "http://example.com/test", nil)
