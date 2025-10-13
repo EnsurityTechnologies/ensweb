@@ -107,8 +107,11 @@ func (s *Server) InitTenantRBAC(defaultConfig []byte, tenantID string) error {
 				return fmt.Errorf("failed to create role %s: %w", r.Name, err)
 			}
 		}
+
 		if s.rolePermisions == nil {
 			s.rolePermisions = make(map[string]map[string][]string)
+		}
+		if s.rolePermisions[tenantID] == nil {
 			s.rolePermisions[tenantID] = make(map[string][]string)
 		}
 
