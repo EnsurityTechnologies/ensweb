@@ -1,6 +1,7 @@
 package ensweb
 
 type Result struct {
-	Status int
-	Done   bool
+	Status       int
+	responseData string
+	Done         bool
 }

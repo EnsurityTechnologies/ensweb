@@ -43,24 +43,27 @@ func (s *Server) auditRequest(req *Request, res *Result, r *http.Request) {
 	if s.auditLog == nil || res == nil {
 		return
 	}
-
-	timeDuration := time.Now().Nanosecond() - req.TimeIn.Nanosecond()
-	userAgent := r.Header.Get("User-Agent")
-
-	if res.Done {
-		s.auditLog.Info("HTTP request processed",
-			"Path", req.Path,
-			"IP Address", req.Connection.RemoteAddr,
-			"Status", res.Status,
-			"Duration", timeDuration,
-			"User-Agent", userAgent)
-	} else {
-		s.auditLog.Error("HTTP request failed",
-			"Path", req.Path,
-			"IP Address", req.Connection.RemoteAddr,
-			"Duration", timeDuration,
-			"User-Agent", userAgent)
+	auditData := &AuditData{
+		ID:             uuid.New().String(),
+		CreationTime:   time.Now(),
+		TenantID:       req.TenantID,
+		RequestPath:    req.Path,
+		Method:         req.Method,
+		UserAgent:      r.Header.Get("User-Agent"),
+		RequestData:    req.requestData,
+		ResponsetData:  res.responseData,
+		Duration:       int64(time.Since(req.TimeIn)),
+		ResponseStatus: res.Status,
 	}
+	if s.getRequesterFunc != nil {
+		auditData.RequesterID, auditData.RequesterType = s.getRequesterFunc(req)
+	}
+	if req.Connection == nil {
+		auditData.ClientIPAddress = getIPAdress(r)
+	} else {
+		auditData.ClientIPAddress = req.Connection.RemoteAddr
+	}
+	go s.auditLog.WriteLog(auditData)
 }
 
 // bufferedReader can be used to replace a request body with a buffered
@@ -319,6 +322,9 @@ func (s *Server) IsFORM(req *Request) (bool, error) {
 
 func (s *Server) ParseNormalJSON(req *Request, model interface{}) error {
 	_, err := parseJSONRequest(false, req.r, req.w, model)
+	if s.auditLog != nil && err == nil {
+		req.requestData = s.auditLog.WrapData(req.TenantID, model)
+	}
 	return err
 }
 
@@ -331,9 +337,15 @@ func (s *Server) ParseJSON(req *Request, model interface{}) error {
 			return err
 		}
 		req.sd = sd.Data
-		return decryptModel(req.nss, req.ss, sd.Data, model)
+		err := decryptModel(req.nss, req.ss, sd.Data, model)
+		if s.auditLog != nil && err == nil {
+			req.requestData = s.auditLog.WrapData(req.TenantID, model)
+		}
 	} else {
 		_, err = parseJSONRequest(false, req.r, req.w, model)
+		if s.auditLog != nil && err == nil {
+			req.requestData = s.auditLog.WrapData(req.TenantID, model)
+		}
 	}
 	return err
 }

@@ -38,6 +38,7 @@ type Request struct {
 	redID       string
 	r           *http.Request
 	w           http.ResponseWriter `json:"-" sentinel:""`
+	requestData string
 }
 
 type ClientToken struct {

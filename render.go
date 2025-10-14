@@ -49,6 +49,9 @@ func (s *Server) RenderJSON(req *Request, model interface{}, status int) *Result
 		res.Status = http.StatusNoContent
 		req.w.WriteHeader(http.StatusNoContent)
 	} else {
+		if s.auditLog != nil {
+			res.responseData = s.auditLog.WrapData(req.TenantID, model)
+		}
 		enc := json.NewEncoder(req.w)
 		if s.secureAPI && !s.isUnProtectedPath(req.Path) {
 			err := s.getSharedSecret(req)
@@ -88,6 +91,9 @@ func (s *Server) RenderNormalJSON(req *Request, model interface{}, status int) *
 		res.Status = http.StatusNoContent
 		req.w.WriteHeader(http.StatusNoContent)
 	} else {
+		if s.auditLog != nil {
+			res.responseData = s.auditLog.WrapData(req.TenantID, model)
+		}
 		enc := json.NewEncoder(req.w)
 		req.w.WriteHeader(status)
 		enc.Encode(model)
@@ -153,6 +159,11 @@ func (s *Server) RenderTemplate(req *Request, renderPath string, model interface
 	res := &Result{
 		Status: status,
 		Done:   true,
+	}
+	if model != nil {
+		if s.auditLog != nil {
+			res.responseData = s.auditLog.WrapData(req.TenantID, model)
+		}
 	}
 	return res
 }

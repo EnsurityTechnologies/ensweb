@@ -54,10 +54,32 @@ const (
 	StatusNone    string = "None"
 )
 
+type AuditData struct {
+	ID              string    `json:"ID"`
+	CreationTime    time.Time `json:"CreationTime"`
+	TenantID        string    `json:"TenantID"`
+	RequesterID     string    `json:"RequesterID"`
+	RequesterType   int       `json:"RequesterType"`
+	RequestPath     string    `json:"RequestPath"`
+	Method          string    `json:"Method"`
+	UserAgent       string    `json:"UserAgent"`
+	RequestData     string    `json:"RequestData"`
+	ResponsetData   string    `json:"ResponsetData"`
+	Duration        int64     `json:"Duration"`
+	ClientIPAddress string    `json:"ClientIPAddress"`
+	ResponseStatus  int       `json:"ResponseStatus"`
+}
+
+type AuditLog interface {
+	WrapData(tenantID string, data interface{}) string
+	WriteLog(auditData *AuditData)
+}
+
 type HandlerFunc func(req *Request) *Result
 type AuthFunc func(req *Request) bool
 type ShutdownFunc func() error
 type GetTenantCBFunc func(tenantName string) (string, error)
+type GetRequester func(req *Request) (string, int)
 
 // Server defines server
 type Server struct {
@@ -66,7 +88,6 @@ type Server struct {
 	s                *http.Server
 	mux              *mux.Router
 	log              logger.Logger
-	auditLog         logger.Logger
 	db               *gorm.DB
 	url              string
 	jwtSecret        string
@@ -92,6 +113,8 @@ type Server struct {
 	subDirectory     string
 	rbac             RBACInterface
 	rolePermisions   map[string]map[string][]string
+	getRequesterFunc GetRequester
+	auditLog         AuditLog
 }
 
 type ServerConfig struct {
@@ -206,6 +229,13 @@ func SetupServerTimeout(readHeaderTimeoout time.Duration, readTimeout time.Durat
 		s.s.ReadHeaderTimeout = readHeaderTimeoout
 		s.s.ReadTimeout = readTimeout
 		s.s.IdleTimeout = idleTimeout
+		return nil
+	}
+}
+
+func SetAuditLog(auditLog AuditLog) ServerOptions {
+	return func(s *Server) error {
+		s.auditLog = auditLog
 		return nil
 	}
 }
@@ -381,10 +411,6 @@ func (s *Server) SetDebugMode() {
 	s.debugMode = true
 }
 
-func (s *Server) SetAuditLog(log logger.Logger) {
-	s.auditLog = log
-}
-
 func (s *Server) SetAPIKey(apiKey string) {
 	s.apiKey = apiKey
 }
@@ -493,4 +519,8 @@ func (s *Server) GetDB() *gorm.DB {
 // GetDB will return DB
 func (s *Server) GetServerURL() string {
 	return s.url
+}
+
+func (s *Server) SetRequesterFunc(getRequesterFunc GetRequester) {
+	s.getRequesterFunc = getRequesterFunc
 }
