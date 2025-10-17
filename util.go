@@ -2,6 +2,7 @@ package ensweb
 
 import (
 	"net/http"
+	"unicode"
 
 	"github.com/EnsurityTechnologies/helper/jsonutil"
 	"golang.org/x/text/cases"
@@ -21,4 +22,13 @@ func JSONDecodeErr(resp *http.Response) (*ErrMessage, error) {
 func ToTitleCase(s string) string {
 	caser := cases.Title(language.English)
 	return caser.String(s)
+}
+
+func CapitalizeFirst(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
