@@ -99,6 +99,14 @@ func EnableClientSecureAPI(licenseKey string, enableV2 bool) ClientOptions {
 				c.log.Error("failed to get server public key, no response from server")
 				return fmt.Errorf("failed to get server public key, no response from server")
 			}
+			if resp.StatusCode != http.StatusOK {
+				c.log.Error("failed to get server public key, invalid status code", "statuscode", resp.StatusCode)
+				if resp.Body != nil {
+					body, _ := ioutil.ReadAll(resp.Body)
+					c.log.Error("response body", "body", string(body))
+				}
+				return fmt.Errorf("failed to get server public key, invalid status code: %d", resp.StatusCode)
+			}
 			var pr PublicKeyResponse
 			err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
 			if err != nil {
@@ -128,7 +136,16 @@ func EnableClientSecureAPI(licenseKey string, enableV2 bool) ClientOptions {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusNoContent {
 				c.log.Error("failed to get server public key, no response from server")
+
 				return fmt.Errorf("failed to get server public key, no response from server")
+			}
+			if resp.StatusCode != http.StatusOK {
+				c.log.Error("failed to get server public key, invalid status code", "statuscode", resp.StatusCode)
+				if resp.Body != nil {
+					body, _ := ioutil.ReadAll(resp.Body)
+					c.log.Error("response body", "body", string(body))
+				}
+				return fmt.Errorf("failed to get server public key, invalid status code: %d", resp.StatusCode)
 			}
 			var pr PublicKeyResponse
 			err = jsonutil.DecodeJSONFromReader(resp.Body, &pr)
