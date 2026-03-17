@@ -181,7 +181,7 @@ func (s *Server) getTenantIDWithError(r *http.Request) (string, error) {
 	if s.tcb != nil {
 		url := r.Host
 		url = strings.TrimPrefix(url, "https://")
-		return s.tcb(url)
+		return s.tcb(url, r.URL.Path)
 	}
 	return s.defaultTenantID.String(), nil
 }

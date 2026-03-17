@@ -78,7 +78,7 @@ type AuditLog interface {
 type HandlerFunc func(req *Request) *Result
 type AuthFunc func(req *Request) bool
 type ShutdownFunc func() error
-type GetTenantCBFunc func(tenantName string) (string, error)
+type GetTenantCBFunc func(tenantName string, path string) (string, error)
 type GetRequester func(req *Request) (string, int)
 
 // Server defines server
