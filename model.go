@@ -10,6 +10,11 @@ type PublicKeyResponse struct {
 	PublicKey string `json:"publicKey"`
 }
 
+type LicenseKeyResponse struct {
+	BaseResponse
+	LicenseKey string `json:"licenseKey"`
+}
+
 type RequestID struct {
 	ID        string `json:"uuid"`
 	JourneyID string `json:"journeyId"`

@@ -39,6 +39,7 @@ const (
 )
 const (
 	GetPublicKeyAPI   string = "/api/getpublickey"
+	GetLicenseKeyAPI  string = "/api/getlicensekey"
 	GetPublicKeyAPIV2 string = "/api/v2/getpublickey"
 )
 
@@ -359,9 +360,11 @@ func NewServer(cfg *Config, serverCfg *ServerConfig, log logger.Logger, options 
 	if s.secureAPI {
 		s.AddRoute(GetPublicKeyAPI, "GET", s.getPublicKeyAPI)
 		s.AddRoute(GetPublicKeyAPIV2, "GET", s.getPublicKeyAPIV2)
+		s.AddRoute(GetLicenseKeyAPI, "GET", s.getLicenseKeyAPI)
 		s.unProtectedPaths = make([]string, 0)
 		s.unProtectedPaths = append(s.unProtectedPaths, s.subDirectory+GetPublicKeyAPI)
 		s.unProtectedPaths = append(s.unProtectedPaths, s.subDirectory+GetPublicKeyAPIV2)
+		s.unProtectedPaths = append(s.unProtectedPaths, s.subDirectory+GetLicenseKeyAPI)
 	}
 
 	return s, nil
@@ -399,6 +402,24 @@ func (s *Server) getPublicKeyAPIV2(req *Request) *Result {
 			Status: true,
 		},
 		PublicKey: s.newPublicKey,
+	}
+	return s.RenderNormalJSON(req, pr, http.StatusOK)
+}
+
+// ShowAccount godoc
+// @Summary      Get the license key of the server
+// @Description  Get the license key of the server
+// @Tags         general
+// @Accept       json
+// @Produce      json
+// @Success      200 {object}  LicenseKeyResponse
+// @Router       /api/getlicensekey [get]
+func (s *Server) getLicenseKeyAPI(req *Request) *Result {
+	pr := LicenseKeyResponse{
+		BaseResponse: BaseResponse{
+			Status: true,
+		},
+		LicenseKey: s.licenseKey,
 	}
 	return s.RenderNormalJSON(req, pr, http.StatusOK)
 }
