@@ -404,12 +404,16 @@ func (s *Server) ParseMultiPartForm(req *Request, dirPath string) ([]string, map
 	return paramFiles, paramTexts, nil
 }
 
-func (s *Server) Redirect(req *Request, url string) *Result {
+func (s *Server) Redirect(req *Request, url string, statusCode ...int) *Result {
 	r := req.r
 	w := req.w
-	http.Redirect(w, r, url, http.StatusSeeOther)
+	code := http.StatusSeeOther
+	if len(statusCode) > 0 {
+		code = statusCode[0]
+	}
+	http.Redirect(w, r, url, code)
 	return &Result{
-		Status: http.StatusSeeOther,
+		Status: code,
 		Done:   true,
 	}
 }
